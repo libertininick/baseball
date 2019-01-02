@@ -3,16 +3,20 @@ import io
 import numpy as np
 import pandas as pd
 import requests
+import sqlalchemy
 import zipfile
 
 
 #%% Zip file download function
 def get_zip(file_url):
     """
-    This function downloads and extracts a file from a zipped url.
+    Downloads and extracts a file from a zipped url.
 
-    :param file_url:
-    :return:
+    Args:
+     file_url (str): url file path of zipped file
+
+    Returns:
+        extracted_file
     """
     url = requests.get(file_url)
     zip_file = zipfile.ZipFile(io.BytesIO(url.content))
@@ -23,6 +27,12 @@ def get_zip(file_url):
         return extracted_file
 
 def gamelog_file_to_df(extracted_file):
+    """
+        Converts an extracted Retrosheet gamelog from get_zip to a pandas DataFrame
+
+        :param extracted_file (str)
+        :return: extracted_file
+        """
     _col_names = ["Date", "DblHdr", "Day", "VisTm", "VisTmLg",
             "VisTmGNum", "HmTm", "HmTmLg", "HmTmGNum", "VisRuns", "HmRuns",
             "NumOuts", "DayNight", "Completion", "Forfeit", "Protest", "ParkID",
@@ -52,12 +62,60 @@ def gamelog_file_to_df(extracted_file):
             "HmBat8Pos", "HmBat9ID", "HmBat9Nm", "HmBat9Pos", "Additional",
             "Acquisition"]
 
-    df = pd.read_csv(extracted_file
-                     , header=None
-                     , names=_col_names
-                     , parse_dates=['Date']
-                     , index_col=['Date']
-                     )
-    return df
+    _df = pd.read_csv(extracted_file
+                      , header=None
+                      , names=_col_names
+                      , parse_dates=['Date']
+                      , index_col=['Date']
+                      )
+    return _df
+
+
+def save_gamelog_frame_to_sql(df
+                              , db_user
+                              , db_pass
+                              , db_name
+                              , db_table
+                              , db_engine_type='postgresql+psycopg2'
+                              , db_host='localhost'
+                              , db_port=5432
+                              , if_exists='fail'
+                              ):
+    """
+    Writes a gamelog DataFrame to SQL db
+
+    Args:
+        df (DataFrame): data to be written
+        db_engine_type (str): SQL database engine
+        db_user (str): database username
+        db_pass (str): database password
+        db_name (str): database name/schema
+        db_table (str): table to write data to
+        if_exists (str): action to take if table exists in schema  {‘fail’, ‘replace’, ‘append’}, default ‘fail’
+        db_host (str): database host
+        db_port (int): database port
+
+    Returns:
+
+    """
+
+    # Create a SQLalchemy Postgre engine
+    _connection_string = f'{db_engine_type}://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}'
+    _engine = sqlalchemy.create_engine(_connection_string, echo=False)
+
+    # Write dataframe to SQL
+    df.to_sql(name=db_table, con=_engine, if_exists=if_exists, index=True)
+
+    # Dispose of SQL engine
+    _engine.dispose()
+
+    return True
+
+
 #%% Testing
 test = gamelog_file_to_df(get_zip('https://www.retrosheet.org/gamelogs/gl2018.zip'))
+save_gamelog_frame_to_sql(test
+                          , db_user='baseball_read_write'
+                          , db_pass='baseball$3796'
+                          , db_name='Baseball'
+                          , db_table='game_logs')
