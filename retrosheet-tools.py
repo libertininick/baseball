@@ -1,5 +1,8 @@
 #%% Imports
 import io
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import requests
@@ -7,7 +10,7 @@ import sqlalchemy
 import zipfile
 
 
-#%% Zip file download function
+#%% Functions
 def get_zip(file_url):
     """
     Downloads and extracts a file from a zipped url.
@@ -26,7 +29,8 @@ def get_zip(file_url):
         extracted_file = zip_file.open(file_name)
         return extracted_file
 
-def gamelog_file_to_df(extracted_file):
+
+def gamelogs_file_to_df(extracted_file):
     """
         Converts an extracted Retrosheet gamelog from get_zip to a pandas DataFrame
 
@@ -71,16 +75,16 @@ def gamelog_file_to_df(extracted_file):
     return _df
 
 
-def save_gamelog_frame_to_sql(df
-                              , db_user
-                              , db_pass
-                              , db_name
-                              , db_table
-                              , db_engine_type='postgresql+psycopg2'
-                              , db_host='localhost'
-                              , db_port=5432
-                              , if_exists='fail'
-                              ):
+def save_gamelogs_frame_to_sql(df
+                               , db_user
+                               , db_pass
+                               , db_name
+                               , db_table
+                               , db_engine_type='postgresql+psycopg2'
+                               , db_host='localhost'
+                               , db_port=5432
+                               , if_exists='fail'
+                               ):
     """
     Writes a gamelog DataFrame to SQL db
 
@@ -112,15 +116,103 @@ def save_gamelog_frame_to_sql(df
     return True
 
 
+def read_gamelogs_from_sql(db_user
+                           , db_pass
+                           , db_name
+                           , db_table
+                           , db_engine_type='postgresql+psycopg2'
+                           , db_host='localhost'
+                           , db_port=5432
+                           ):
+    """
+    Reads gamelogs from SQL db to DataFrame
+
+    Args:
+        db_engine_type (str): SQL database engine
+        db_user (str): database username
+        db_pass (str): database password
+        db_name (str): database name/schema
+        db_table (str): table to write data to
+        db_host (str): database host
+        db_port (int): database port
+
+    Returns:
+        df_gamelogs (DataFrame)
+
+    """
+
+    # Create a SQLalchemy Postgre engine
+    _connection_string = f'{db_engine_type}://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}'
+    _engine = sqlalchemy.create_engine(_connection_string, echo=False)
+
+    # SQL expression
+    _expression = f'SELECT * FROM {db_table}'
+
+    # Read from SQL
+    _df_gamelogs = pd.read_sql(_expression, _engine, index_col='Date')
+
+    # Convert index to datetime
+    _df_gamelogs.index = pd.to_datetime(_df_gamelogs.index, utc=True)
+
+    # Dispose of SQL engine
+    _engine.dispose()
+
+    return _df_gamelogs
+
+
+def parse_line_score(line_score):
+    """
+        Parses a line_score str to a array of runs per inning
+
+        Args:
+            line_score (str): team's line score [010000(10)0x]
+
+        Returns:
+            runs_per_inning (list)
+
+        """
+
+    # Loop on characters
+    _runs_per_inning = []
+    _run_char = ''
+
+    for x in list(line_score):
+
+        if (x not in ['(', ')', 'x']) and (_run_char == ''):
+            _runs_per_inning.append(int(x))
+        elif x == '(':
+            _run_char = '*'
+        elif (x not in ['(', ')', 'x']) and (_run_char != ''):
+            _run_char += x
+        elif x == ')':
+            _runs_per_inning.append(int(_run_char[1:]))
+            _run_char = ''
+
+    return _runs_per_inning
+
+
 #%% Write game logs to SQL DB
-dfs = [gamelog_file_to_df(get_zip(f'https://www.retrosheet.org/gamelogs/gl{yr}.zip')) for yr in range(2000, 2019, 1)]
+dfs = [gamelogs_file_to_df(get_zip(f'https://www.retrosheet.org/gamelogs/gl{yr}.zip')) for yr in range(2000, 2019, 1)]
 df_stack = pd.concat(dfs, axis='rows')
 
-save_gamelog_frame_to_sql(df_stack
-                          , db_user='baseball_read_write'
-                          , db_pass='baseball$3796'
-                          , db_name='Baseball'
-                          , db_table='game_logs'
-                          , if_exists='replace'
-                          )
+save_gamelogs_frame_to_sql(df_stack
+                           , db_user='baseball_read_write'
+                           , db_pass='baseball$3796'
+                           , db_name='Baseball'
+                           , db_table='game_logs'
+                           , if_exists='replace'
+                           )
 
+
+#%% Load all game logs from SQL DB
+df_gamelogs = read_gamelogs_from_sql(db_user='baseball_read_write'
+                                     , db_pass='baseball$3796'
+                                     , db_name='Baseball'
+                                     , db_table='game_logs')
+
+#%% Build data
+df_gamelogs['VisScore'] = df_gamelogs['VisLine'].apply(lambda x: sum(parse_line_score(x)))
+
+#%% Viz
+df_gamelogs['VisScore'].plot(kind='hist', bins=30, alpha=0.5)
+plt.show()
