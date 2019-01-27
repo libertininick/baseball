@@ -1,17 +1,14 @@
-#%% Imports
+# %% Imports
 import io
 import matplotlib
-matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import requests
 import sqlalchemy
 import zipfile
 
 
-#%% Functions
-def get_zip(file_url):
+# %% Functions
+def request_zipped_url(file_url):
     """
     Downloads and extracts a file from a zipped url.
 
@@ -21,70 +18,81 @@ def get_zip(file_url):
     Returns:
         extracted_file
     """
-    url = requests.get(file_url)
-    zip_file = zipfile.ZipFile(io.BytesIO(url.content))
+
+    # GET request for url
+    response = requests.get(file_url)
+
+    # Unzip http response
+    zip_file = zipfile.ZipFile(io.BytesIO(response.content))
+
+    # Files in zipped package
     zip_names = zip_file.namelist()
+
+    # Extract
     if len(zip_names) == 1:
         file_name = zip_names.pop()
         extracted_file = zip_file.open(file_name)
         return extracted_file
 
 
-def gamelogs_file_to_df(extracted_file):
+def gamelogs_to_df(extracted_file):
     """
-        Converts an extracted Retrosheet gamelog from get_zip to a pandas DataFrame
+    Converts an extracted Retrosheet gamelog from get_zip to a pandas DataFrame
 
-        :param extracted_file (str)
-        :return: extracted_file
-        """
-    _col_names = ['Date', 'DblHdr', 'Day', 'VisTm', 'VisTmLg',
-                  'VisTmGNum', 'HmTm', 'HmTmLg', 'HmTmGNum', 'VisRuns', 'HmRuns',
-                  'NumOuts', 'DayNight', 'Completion', 'Forfeit', 'Protest', 'ParkID',
-                  'Attendance', 'Duration', 'VisLine', 'HmLine', 'VisAB', 'VisH',
-                  'VisD', 'VisT', 'VisHR', 'VisRBI', 'VisSH', 'VisSF', 'VisHBP',
-                  'VisBB', 'VisIBB', 'VisK', 'VisSB', 'VisCS', 'VisGDP', 'VisCI',
-                  'VisLOB', 'VisPs', 'VisER', 'VisTER', 'VisWP', 'VisBalks', 'VisPO',
-                  'VisA', 'VisE', 'VisPassed', 'VisDB', 'VisTP', 'HmAB', 'HmH',
-                  'HmD', 'HmT', 'HmHR', 'HmRBI', 'HmSH', 'HmSF', 'HmHBP', 'HmBB',
-                  'HmIBB', 'HmK', 'HmSB', 'HmCS', 'HmGDP', 'HmCI', 'HmLOB', 'HmPs',
-                  'HmER', 'HmTER', 'HmWP', 'HmBalks', 'HmPO', 'HmA', 'HmE', 'HmPass',
-                  'HmDB', 'HmTP', 'UmpHID', 'UmpHNm', 'Ump1BID', 'Ump1BNm', 'Ump2BID',
-                  'Ump2BNm', 'Ump3BID', 'Ump3BNm', 'UmpLFID', 'UmpLFNm', 'UmpRFID',
-                  'UmpRFNm', 'VisMgrID', 'VisMgrNm', 'HmMgrID', 'HmMgrNm', 'WinPID',
-                  'WinPNm', 'PID', 'PNAme', 'SavePID', 'SavePNm', 'GWinRBIID',
-                  'GWinRBINm', 'VisStPchID', 'VisStPchNm', 'HmStPchID', 'HmStPchNm',
-                  'VisBat1ID', 'VisBat1Nm', 'VisBat1Pos', 'VisBat2ID', 'VisBat2Nm',
-                  'VisBat2Pos', 'VisBat3ID', 'VisBat3Nm', 'VisBat3Pos', 'VisBat4ID',
-                  'VisBat4Nm', 'VisBat4Pos', 'VisBat5ID', 'VisBat5Nm', 'VisBat5Pos',
-                  'VisBat6ID', 'VisBat6Nm', 'VisBat6Pos', 'VisBat7ID', 'VisBat7Nm',
-                  'VisBat7Pos', 'VisBat8ID', 'VisBat8Nm', 'VisBat8Pos', 'VisBat9ID',
-                  'VisBat9Nm', 'VisBat9Pos', 'HmBat1ID', 'HmBat1Nm', 'HmBat1Pos',
-                  'HmBat2ID', 'HmBat2Nm', 'HmBat2Pos', 'HmBat3ID', 'HmBat3Nm',
-                  'HmBat3Pos', 'HmBat4ID', 'HmBat4Nm', 'HmBat4Pos', 'HmBat5ID',
-                  'HmBat5Nm', 'HmBat5Pos', 'HmBat6ID', 'HmBat6Nm', 'HmBat6Pos',
-                  'HmBat7ID', 'HmBat7Nm', 'HmBat7Pos', 'HmBat8ID', 'HmBat8Nm',
-                  'HmBat8Pos', 'HmBat9ID', 'HmBat9Nm', 'HmBat9Pos', 'Additional',
-                  'Acquisition']
+    Args:
+        extracted_file (str)
 
-    _df = pd.read_csv(extracted_file
-                      , header=None
-                      , names=_col_names
-                      , parse_dates=['Date']
-                      , index_col=['Date']
-                      )
-    return _df
+    Returns:
+        df (DataFrame)
+    """
+    col_names = ['Date', 'DblHdr', 'Day', 'VisTm', 'VisTmLg',
+                 'VisTmGNum', 'HmTm', 'HmTmLg', 'HmTmGNum', 'VisRuns', 'HmRuns',
+                 'NumOuts', 'DayNight', 'Completion', 'Forfeit', 'Protest', 'ParkID',
+                 'Attendance', 'Duration', 'VisLine', 'HmLine', 'VisAB', 'VisH',
+                 'VisD', 'VisT', 'VisHR', 'VisRBI', 'VisSH', 'VisSF', 'VisHBP',
+                 'VisBB', 'VisIBB', 'VisK', 'VisSB', 'VisCS', 'VisGDP', 'VisCI',
+                 'VisLOB', 'VisPs', 'VisER', 'VisTER', 'VisWP', 'VisBalks', 'VisPO',
+                 'VisA', 'VisE', 'VisPassed', 'VisDB', 'VisTP', 'HmAB', 'HmH',
+                 'HmD', 'HmT', 'HmHR', 'HmRBI', 'HmSH', 'HmSF', 'HmHBP', 'HmBB',
+                 'HmIBB', 'HmK', 'HmSB', 'HmCS', 'HmGDP', 'HmCI', 'HmLOB', 'HmPs',
+                 'HmER', 'HmTER', 'HmWP', 'HmBalks', 'HmPO', 'HmA', 'HmE', 'HmPass',
+                 'HmDB', 'HmTP', 'UmpHID', 'UmpHNm', 'Ump1BID', 'Ump1BNm', 'Ump2BID',
+                 'Ump2BNm', 'Ump3BID', 'Ump3BNm', 'UmpLFID', 'UmpLFNm', 'UmpRFID',
+                 'UmpRFNm', 'VisMgrID', 'VisMgrNm', 'HmMgrID', 'HmMgrNm', 'WinPID',
+                 'WinPNm', 'PID', 'PNAme', 'SavePID', 'SavePNm', 'GWinRBIID',
+                 'GWinRBINm', 'VisStPchID', 'VisStPchNm', 'HmStPchID', 'HmStPchNm',
+                 'VisBat1ID', 'VisBat1Nm', 'VisBat1Pos', 'VisBat2ID', 'VisBat2Nm',
+                 'VisBat2Pos', 'VisBat3ID', 'VisBat3Nm', 'VisBat3Pos', 'VisBat4ID',
+                 'VisBat4Nm', 'VisBat4Pos', 'VisBat5ID', 'VisBat5Nm', 'VisBat5Pos',
+                 'VisBat6ID', 'VisBat6Nm', 'VisBat6Pos', 'VisBat7ID', 'VisBat7Nm',
+                 'VisBat7Pos', 'VisBat8ID', 'VisBat8Nm', 'VisBat8Pos', 'VisBat9ID',
+                 'VisBat9Nm', 'VisBat9Pos', 'HmBat1ID', 'HmBat1Nm', 'HmBat1Pos',
+                 'HmBat2ID', 'HmBat2Nm', 'HmBat2Pos', 'HmBat3ID', 'HmBat3Nm',
+                 'HmBat3Pos', 'HmBat4ID', 'HmBat4Nm', 'HmBat4Pos', 'HmBat5ID',
+                 'HmBat5Nm', 'HmBat5Pos', 'HmBat6ID', 'HmBat6Nm', 'HmBat6Pos',
+                 'HmBat7ID', 'HmBat7Nm', 'HmBat7Pos', 'HmBat8ID', 'HmBat8Nm',
+                 'HmBat8Pos', 'HmBat9ID', 'HmBat9Nm', 'HmBat9Pos', 'Additional',
+                 'Acquisition']
+
+    df = pd.read_csv(extracted_file
+                     , header=None
+                     , names=col_names
+                     , parse_dates=['Date']
+                     , index_col=['Date']
+                     )
+    return df
 
 
-def save_gamelogs_frame_to_sql(df
-                               , db_user
-                               , db_pass
-                               , db_name
-                               , db_table
-                               , db_engine_type='postgresql+psycopg2'
-                               , db_host='localhost'
-                               , db_port=5432
-                               , if_exists='fail'
-                               ):
+def save_gamelogs_to_sql(df
+                         , db_user
+                         , db_pass
+                         , db_name
+                         , db_table
+                         , db_engine_type='postgresql+psycopg2'
+                         , db_host='localhost'
+                         , db_port=5432
+                         , if_exists='fail'
+                         ):
     """
     Writes a gamelog DataFrame to SQL db
 
@@ -100,20 +108,21 @@ def save_gamelogs_frame_to_sql(df
         db_port (int): database port
 
     Returns:
+        None
 
     """
 
     # Create a SQLalchemy Postgre engine
-    _connection_string = f'{db_engine_type}://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}'
-    _engine = sqlalchemy.create_engine(_connection_string, echo=False)
+    connection_string = f'{db_engine_type}://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}'
+    engine = sqlalchemy.create_engine(connection_string, echo=False)
 
     # Write dataframe to SQL
-    df.to_sql(name=db_table, con=_engine, if_exists=if_exists, index=True)
+    df.to_sql(name=db_table, con=engine, if_exists=if_exists, index=True)
 
     # Dispose of SQL engine
-    _engine.dispose()
+    engine.dispose()
 
-    return True
+    return None
 
 
 def read_gamelogs_from_sql(db_user
@@ -142,77 +151,78 @@ def read_gamelogs_from_sql(db_user
     """
 
     # Create a SQLalchemy Postgre engine
-    _connection_string = f'{db_engine_type}://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}'
-    _engine = sqlalchemy.create_engine(_connection_string, echo=False)
+    connection_string = f'{db_engine_type}://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}'
+    engine = sqlalchemy.create_engine(connection_string, echo=False)
 
     # SQL expression
-    _expression = f'SELECT * FROM {db_table}'
+    sql_expression = f'SELECT * FROM {db_table}'
 
     # Read from SQL
-    _df_gamelogs = pd.read_sql(_expression, _engine, index_col='Date')
+    df_gamelogs = pd.read_sql(sql_expression, engine, index_col='Date')
 
     # Convert index to datetime
-    _df_gamelogs.index = pd.to_datetime(_df_gamelogs.index, utc=True)
+    df_gamelogs.index = pd.to_datetime(df_gamelogs.index, utc=True)
 
     # Dispose of SQL engine
-    _engine.dispose()
+    engine.dispose()
 
-    return _df_gamelogs
+    return df_gamelogs
 
 
 def parse_line_score(line_score):
     """
-        Parses a line_score str to a array of runs per inning
+    Parses a line_score str to a array of runs per inning
 
-        Args:
-            line_score (str): team's line score [010000(10)0x]
+    Args:
+        line_score (str): team's line score [010000(10)0x]
 
-        Returns:
-            runs_per_inning (list)
+    Returns:
+        runs_per_inning (list)
 
-        """
+    """
 
     # Loop on characters
-    _runs_per_inning = []
-    _run_char = ''
+    runs_per_inning = []
+    run_char = ''
 
     for x in list(line_score):
 
-        if (x not in ['(', ')', 'x']) and (_run_char == ''):
-            _runs_per_inning.append(int(x))
+        if (x not in ['(', ')', 'x']) and (run_char == ''):
+            runs_per_inning.append(int(x))
         elif x == '(':
-            _run_char = '*'
-        elif (x not in ['(', ')', 'x']) and (_run_char != ''):
-            _run_char += x
+            run_char = '*'
+        elif (x not in ['(', ')', 'x']) and (run_char != ''):
+            run_char += x
         elif x == ')':
-            _runs_per_inning.append(int(_run_char[1:]))
-            _run_char = ''
+            runs_per_inning.append(int(run_char[1:]))
+            run_char = ''
 
-    return _runs_per_inning
+    return runs_per_inning
 
 
-#%% Write game logs to SQL DB
-dfs = [gamelogs_file_to_df(get_zip(f'https://www.retrosheet.org/gamelogs/gl{yr}.zip')) for yr in range(2000, 2019, 1)]
+# %% Write game logs to SQL DB
+dfs = [gamelogs_to_df(request_zipped_url(f'https://www.retrosheet.org/gamelogs/gl{yr}.zip')) for yr in
+       range(2000, 2019, 1)]
 df_stack = pd.concat(dfs, axis='rows')
 
-save_gamelogs_frame_to_sql(df_stack
-                           , db_user='baseball_read_write'
-                           , db_pass='baseball$3796'
-                           , db_name='Baseball'
-                           , db_table='game_logs'
-                           , if_exists='replace'
-                           )
+save_gamelogs_to_sql(df_stack
+                     , db_user='baseball_read_write'
+                     , db_pass='baseball$3796'
+                     , db_name='Baseball'
+                     , db_table='game_logs'
+                     , if_exists='replace'
+                     )
 
-
-#%% Load all game logs from SQL DB
+# %% Load all game logs from SQL DB
 df_gamelogs = read_gamelogs_from_sql(db_user='baseball_read_write'
                                      , db_pass='baseball$3796'
                                      , db_name='Baseball'
                                      , db_table='game_logs')
 
-#%% Build data
+# %% Build data
 df_gamelogs['VisScore'] = df_gamelogs['VisLine'].apply(lambda x: sum(parse_line_score(x)))
 
-#%% Viz
+# %% Viz
+matplotlib.use('TkAgg')
 df_gamelogs['VisScore'].plot(kind='hist', bins=30, alpha=0.5)
-plt.show()
+matplotlib.pyplot.show()
