@@ -1,10 +1,21 @@
+# %% Imports
 import bs4
 import pandas as pd
 import requests
-import scrapy
 
 
-def parse_html_table(table):
+# %% Functions
+def html_table_to_df(table):
+    """
+    Parses a html table into a DataFrame
+
+    Args:
+        table (Tag): html table to convert to a DataFrame
+
+    Returns:
+        df (DataFrame)
+    """
+
     n_columns = 0
     n_rows = 0
     column_names = []
@@ -45,15 +56,16 @@ def parse_html_table(table):
             row_marker += 1
 
     # Convert to float if possible
-    for col in df:
+    for column in df:
         try:
-            df[col] = df[col].astype(float)
+            df[column] = df[column].astype(float)
         except ValueError:
             pass
 
     return df
 
 
+# %% Testing
 url = 'https://www.fangraphs.com/teams/bluejays/schedule?season=2017'
 page = requests.get(url)
 soup = bs4.BeautifulSoup(page.content, 'html.parser')
@@ -62,13 +74,13 @@ print(soup.prettify())
 result = (soup
           .find(class_='team-schedule-table')
           .find('table')
-          #.find_all(id='form1')[0]
-          #.find_all(id='wrapper')[0]
-          #.find_all(id='content')
-          #.find(class_='team-schedule')
-          #.find_all(class_='team-schedule-table')
+          # .find_all(id='form1')[0]
+          # .find_all(id='wrapper')[0]
+          # .find_all(id='content')
+          # .find(class_='team-schedule')
+          # .find_all(class_='team-schedule-table')
           )
 
-test = parse_html_table(result)
+test = html_table_to_df(table_list[2])
 print(result.prettify())
-#content > div.team-body > div > div > div.team-schedule-table
+# content > div.team-body > div > div > div.team-schedule-table
