@@ -65,6 +65,28 @@ def html_table_to_df(table):
     return df
 
 
+# %% Fangraphs win probabilities
+df_list = []
+
+with requests.Session() as session:
+    #session.auth = ('username', getpass())
+
+    teams = ['bluejays', 'angels']
+    seasons = [2016, 2017]
+    # Instead of requests.get(), you'll use session.get()
+
+    for team in teams:
+        for season in seasons:
+            response = session.get(f'https://www.fangraphs.com/teams/{team}/schedule?season={season}')
+            soup = bs4.BeautifulSoup(response.content, 'html.parser')
+            table_list = soup.find_all('table')
+            df = html_table_to_df(table_list[2])
+            df['Team'] = team
+            df['Win_prob'] = df.filter(regex=(".*Win Prob"))
+
+            df_list.append(df[['Date', 'Team', 'Opp', 'Win_prob', 'W/L']])
+
+data = pd.concat(df_list, axis='rows')
 # %% Testing
 url = 'https://www.fangraphs.com/teams/bluejays/schedule?season=2017'
 page = requests.get(url)
@@ -84,3 +106,8 @@ result = (soup
 test = html_table_to_df(table_list[2])
 print(result.prettify())
 # content > div.team-body > div > div > div.team-schedule-table
+test = (soup
+        .find(class_='select-change-team')
+        .find_all('option')
+        #.contents
+        )
