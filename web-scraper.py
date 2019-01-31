@@ -2,6 +2,7 @@
 import bs4
 import pandas as pd
 import requests
+import time
 
 
 # %% Functions
@@ -77,16 +78,41 @@ with requests.Session() as session:
 
     for team in teams:
         for season in seasons:
-            response = session.get(f'https://www.fangraphs.com/teams/{team}/schedule?season={season}')
-            soup = bs4.BeautifulSoup(response.content, 'html.parser')
-            table_list = soup.find_all('table')
-            df = html_table_to_df(table_list[2])
-            df['Team'] = team
-            df['Win_prob'] = df.filter(regex=(".*Win Prob"))
+            response = requests.get(f'https://www.fangraphs.com/teams/{team}/schedule?season={season}'
+                                   #, timeout=3.05
+                                   )
 
-            df_list.append(df[['Date', 'Team', 'Opp', 'Win_prob', 'W/L']])
+            if response:
+                if response.status_code == 200:
+
+                    # Parse response
+                    start = time.time()
+                    soup = bs4.BeautifulSoup(markup=response.content
+                                             , features='lxml'
+                                             , parse_only=bs4.SoupStrainer('div', {'class': 'team-schedule-table'})
+                                             )
+
+                    end = time.time()
+                    print(end - start)
+
+                    # extract table
+                    html_table = soup.find('table')
+
+                    # Convert table to DataFrame
+                    df = html_table_to_df(html_table)
+
+                    # Clean up df
+                    df['Team'] = team
+                    df['Win_prob'] = df.filter(regex=(".*Win Prob"))
+
+                    # Set the index to be the converted 'Date' column
+                    df.set_index('Date', inplace=True)
+                    #df.index = pd.to_datetime(df.index)
+
+                    df_list.append(df[['Team', 'Opp', 'Win_prob', 'W/L']])
 
 data = pd.concat(df_list, axis='rows')
+
 # %% Testing
 url = 'https://www.fangraphs.com/teams/bluejays/schedule?season=2017'
 page = requests.get(url)
