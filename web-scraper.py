@@ -1,9 +1,10 @@
 # %% Imports
 import bs4
+
+import matplotlib
 import pandas as pd
-import re
 import requests
-import time
+import seaborn as sns
 
 
 # %% Functions
@@ -67,79 +68,134 @@ def html_table_to_df(table):
     return df
 
 
-# %% Fangraphs win probabilities
-df_list = []
-teams = ['bluejays', 'angels']
-seasons = [2016, 2017]
-with requests.Session() as session:
-    #session.auth = ('username', getpass())
+def fangraphs_win_prob(seasons, teams=[], verbose=False):
+    """
+    Scrapes win probabilities and outcomes from Fangraphs.com
 
-    for team in teams:
-        for season in seasons:
-            response = session.get(f'https://www.fangraphs.com/teams/{team}/schedule?season={season}'
-                                   , timeout=3.05
-                                   )
+    Args:
+        seasons (list): list of years
+        teams (list): list of team names
+        verbose (bool): whether to print status update for every (team, season). Default = False
 
-            if response:
-                if response.status_code == 200:
+    Returns:
+        df (DataFrame)
+    """
+    if len(teams) == 0:
+        teams = ['orioles'
+            , 'redsox'
+            , 'whitesox'
+            , 'indians'
+            , 'tigers'
+            , 'astros'
+            , 'royals'
+            , 'angels'
+            , 'twins'
+            , 'yankees'
+            , 'athletics'
+            , 'mariners'
+            , 'rays'
+            , 'rangers'
+            , 'bluejays'
+            , 'diamondbacks'
+            , 'braves'
+            , 'cubs'
+            , 'reds'
+            , 'rockies'
+            , 'dodgers'
+            , 'marlins'
+            , 'brewers'
+            , 'mets'
+            , 'phillies'
+            , 'pirates'
+            , 'padres'
+            , 'giants'
+            , 'cardinals'
+            , 'nationals'
+                 ]
 
-                    # Parse response
-                    soup = bs4.BeautifulSoup(markup=response.content
-                                             , features='lxml'
-                                             , parse_only=bs4.SoupStrainer('div', {'class': 'team-schedule-table'})
-                                             )
+    df_list = []
+    failure_log = []
+    with requests.Session() as session:
+        #session.auth = ('username', getpass())
+        for team in teams:
+            for season in seasons:
 
-                    # extract table
-                    html_table = soup.find('table')
+                # GET request
+                response = session.get(f'https://www.fangraphs.com/teams/{team}/schedule?season={season}'
+                                       , timeout=3.05
+                                       )
 
-                    # Convert table to DataFrame
-                    df = html_table_to_df(html_table)
+                if response:
+                    if response.status_code == 200:
+                        # Status update
+                        if verbose:
+                            print(f'{team}:{season}')
 
-                    # Date index
-                    df['Date'] = (df['Date']
-                                  .str
-                                  .extract(pat=r'([a-zA-Z]{3}\s[0-9]{1,2},\s[0-9]{4})')
-                                  )
+                        # Parse response
+                        soup = bs4.BeautifulSoup(markup=response.content
+                                                 , features='lxml'
+                                                 , parse_only=bs4.SoupStrainer('div', {'class': 'team-schedule-table'})
+                                                 )
 
-                    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-                    df.set_index('Date', inplace=True)
+                        # extract table
+                        html_table = soup.find('table')
 
-                    # Win probability column
-                    win_prob = df.filter(regex=(".*Win Prob"))
-                    df['Win_prob'] = win_prob
+                        # Convert table to DataFrame
+                        df = html_table_to_df(html_table)
 
-                    # Team name column
-                    team_name = win_prob.columns[0][:3]
-                    df['Team'] = team_name
+                        # Date index
+                        df['Date'] = (df['Date']
+                                      .str
+                                      .extract(pat=r'([a-zA-Z]{3}\s[0-9]{1,2},\s[0-9]{4})', expand=False)
+                                      )
 
-                    # Home/Away
-                    df['Location'] = [{'at': 'Away', 'vs': 'Home'}[x] for x in df['']]
+                        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+                        df.set_index('Date', inplace=True)
 
-                    df_list.append(df[['Team', 'Opp', 'Win_prob', 'W/L']])
+                        # Win probability column
+                        win_prob = df.filter(regex=(".*Win Prob"))
+                        df['Win_prob'] = pd.to_numeric(win_prob.str.replace(pat='%', repl=''), errors='coerce').divide(100.)
 
-data = pd.concat(df_list, axis='rows')
+                        # Team name column
+                        team_name = win_prob.columns[0][:3]
+                        df['Team'] = team_name
 
-# %% Testing
-url = 'https://www.fangraphs.com/teams/bluejays/schedule?season=2017'
-page = requests.get(url)
-soup = bs4.BeautifulSoup(page.content, 'html.parser')
-table_list = soup.find_all('table')
-print(soup.prettify())
-result = (soup
-          .find(class_='team-schedule-table')
-          .find('table')
-          # .find_all(id='form1')[0]
-          # .find_all(id='wrapper')[0]
-          # .find_all(id='content')
-          # .find(class_='team-schedule')
-          # .find_all(class_='team-schedule-table')
-          )
+                        # Home/Away
+                        df['Location'] = [{'at': 'Away', 'vs': 'Home'}.get(x, None) for x in df['']]
 
-test = html_table_to_df(table_list[2])
-print(result.prettify())
-# content > div.team-body > div > div > div.team-schedule-table
-test = (soup
-        .find(class_='select-change-team')
-        .find_all('option')
-        #.contents
-        )
+                        # Win/Loss
+                        df['Win'] = [{'W': 1, 'L': 0}.get(x, None) for x in df['W/L']]
+
+                        # Runs scored
+                        df['Runs_scored'] = pd.to_numeric(df[team_name + 'Runs'], errors='coerce')
+
+                        # Runs allowed
+                        df['Runs_allowed'] =  pd.to_numeric(df['OppRuns'], errors='coerce')
+
+                        df_list.append(df[['Team', 'Opp', 'Win_prob', 'Win', 'Runs_scored', 'Runs_allowed']])
+
+    return pd.concat(df_list, axis='rows')
+
+
+# %% Fangraphs win probability analysis
+
+
+df_win_prob = fangraphs_win_prob(seasons=list(range(2015, 2019, 1))
+                                 #, teams=['orioles', 'redsox', 'whitesox']
+                                 , verbose=True
+                                 )
+df_win_prob['Win_prob'] = pd.to_numeric(df_win_prob['Win_prob'].str.replace(pat='%', repl=''), errors='coerce').divide(100.)
+#astype('float64')
+df_win_prob.to_csv('C:\\Users\\Nick\\Dropbox\\Baseball\\win_prob.csv')
+
+# %% Viz
+#matplotlib.use('TkAgg')
+
+df_win_prob['Year'] = df_win_prob.index.year
+g = sns.FacetGrid(data=df_win_prob, row='Year')
+g.map(sns.regplot, x='Win_prob'
+            , y='Win'
+            , x_bins=30
+            , data=df_win_prob)
+matplotlib.pyplot.plot([0.2, 0.8], [0.2, 0.8])
+matplotlib.pyplot.show()
