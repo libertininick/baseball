@@ -1,6 +1,7 @@
 # %% Imports
 import bs4
 import pandas as pd
+import re
 import requests
 import time
 
@@ -68,32 +69,25 @@ def html_table_to_df(table):
 
 # %% Fangraphs win probabilities
 df_list = []
-
+teams = ['bluejays', 'angels']
+seasons = [2016, 2017]
 with requests.Session() as session:
     #session.auth = ('username', getpass())
 
-    teams = ['bluejays', 'angels']
-    seasons = [2016, 2017]
-    # Instead of requests.get(), you'll use session.get()
-
     for team in teams:
         for season in seasons:
-            response = requests.get(f'https://www.fangraphs.com/teams/{team}/schedule?season={season}'
-                                   #, timeout=3.05
+            response = session.get(f'https://www.fangraphs.com/teams/{team}/schedule?season={season}'
+                                   , timeout=3.05
                                    )
 
             if response:
                 if response.status_code == 200:
 
                     # Parse response
-                    start = time.time()
                     soup = bs4.BeautifulSoup(markup=response.content
                                              , features='lxml'
                                              , parse_only=bs4.SoupStrainer('div', {'class': 'team-schedule-table'})
                                              )
-
-                    end = time.time()
-                    print(end - start)
 
                     # extract table
                     html_table = soup.find('table')
@@ -101,13 +95,25 @@ with requests.Session() as session:
                     # Convert table to DataFrame
                     df = html_table_to_df(html_table)
 
-                    # Clean up df
-                    df['Team'] = team
-                    df['Win_prob'] = df.filter(regex=(".*Win Prob"))
+                    # Date index
+                    df['Date'] = (df['Date']
+                                  .str
+                                  .extract(pat=r'([a-zA-Z]{3}\s[0-9]{1,2},\s[0-9]{4})')
+                                  )
 
-                    # Set the index to be the converted 'Date' column
+                    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
                     df.set_index('Date', inplace=True)
-                    #df.index = pd.to_datetime(df.index)
+
+                    # Win probability column
+                    win_prob = df.filter(regex=(".*Win Prob"))
+                    df['Win_prob'] = win_prob
+
+                    # Team name column
+                    team_name = win_prob.columns[0][:3]
+                    df['Team'] = team_name
+
+                    # Home/Away
+                    df['Location'] = [{'at': 'Away', 'vs': 'Home'}[x] for x in df['']]
 
                     df_list.append(df[['Team', 'Opp', 'Win_prob', 'W/L']])
 
