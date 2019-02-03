@@ -1,5 +1,8 @@
 # %% Imports
+import io
 import pandas as pd
+import requests
+import zipfile
 
 
 # %% Functions
@@ -62,4 +65,32 @@ def html_table_to_df(table):
 
     return df
 
+
+def request_zipped_url(file_url):
+    """
+    Downloads and extracts a file from a zipped url.
+
+    Args:
+     file_url (str): url file path of zipped file
+
+    Returns:
+        extracted_file
+    """
+
+    # GET request for url
+    response = requests.get(file_url)
+
+    # Unzip http response
+    zip_file = zipfile.ZipFile(io.BytesIO(response.content))
+
+    # Files in zipped package
+    zip_names = zip_file.namelist()
+
+    # Extract
+    if len(zip_names) == 1:
+        file_name = zip_names.pop()
+        extracted_file = zip_file.open(file_name)
+        return extracted_file
+    else:
+        return None
 
