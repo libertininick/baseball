@@ -6,9 +6,6 @@ from web_scraper_tools import request_zipped_url
 
 
 # %% Functions
-
-
-
 def gamelogs_to_df(extracted_file):
     """
     Converts an extracted Retrosheet gamelog from get_zip to a pandas DataFrame
@@ -176,7 +173,7 @@ def parse_line_score(line_score):
 
 # %% Write game logs to SQL DB
 dfs = [gamelogs_to_df(request_zipped_url(f'https://www.retrosheet.org/gamelogs/gl{yr}.zip')) for yr in
-       range(2000, 2019, 1)]
+       range(2018, 2019, 1)]
 df_stack = pd.concat(dfs, axis='rows')
 
 save_gamelogs_to_sql(df_stack

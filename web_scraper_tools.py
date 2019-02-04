@@ -2,6 +2,7 @@
 import io
 import pandas as pd
 import requests
+from sspipe import p
 import zipfile
 
 
@@ -78,19 +79,27 @@ def request_zipped_url(file_url):
     """
 
     # GET request for url
-    response = requests.get(file_url)
+    with requests.Session() as session:
+        response = session.get(file_url)
 
-    # Unzip http response
-    zip_file = zipfile.ZipFile(io.BytesIO(response.content))
+        if response:
+            if response.status_code == 200:
+                # Unzip http response
+                zip_file = (response.content
+                            | p(io.BytesIO)
+                            | p(zipfile.ZipFile)
+                            )
 
-    # Files in zipped package
-    zip_names = zip_file.namelist()
 
-    # Extract
-    if len(zip_names) == 1:
-        file_name = zip_names.pop()
-        extracted_file = zip_file.open(file_name)
-        return extracted_file
-    else:
-        return None
+                # Files in zipped package
+                zip_names = zip_file.namelist()
 
+                # Extract
+                if len(zip_names) == 1:
+                    file_name = zip_names.pop()
+                    extracted_file = zip_file.open(file_name)
+                    return extracted_file
+                else:
+                    return None
+
+#test = request_zipped_url(f'https://www.retrosheet.org/gamelogs/gl2009.zip')
