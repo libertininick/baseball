@@ -190,10 +190,34 @@ df_gamelogs = read_gamelogs_from_sql(db_user='baseball_read_write'
                                      , db_name='Baseball'
                                      , db_table='game_logs')
 
-# %% Build data
-df_gamelogs['VisScore'] = df_gamelogs['VisLine'].apply(lambda x: sum(parse_line_score(x)))
+# %% Game outcome analysis
+fields = ['VisH'
+    , 'VisHR'
+    , 'VisK'
+    , 'VisSB'
+    , 'VisCS'
+    , 'HmH'
+    , 'HmHR'
+    , 'HmK'
+    , 'HmSB'
+    , 'HmCS']
+df_outcomes = df_gamelogs[fields]
+df_outcomes['Vis_EBH'] = df_gamelogs['VisD'].add(df_gamelogs['VisT'])
+df_outcomes['Vis_free'] = df_gamelogs['VisBB'].add(df_gamelogs['VisHBP'])
+df_outcomes['Hm_EBH'] = df_gamelogs['HmD'].add(df_gamelogs['HmT'])
+df_outcomes['Hm_free'] = df_gamelogs['HmBB'].add(df_gamelogs['HmHBP'])
+
+# Normalize by number of outs (number of innings)
+df_outcomes = df_outcomes.divide(df_gamelogs['NumOuts'], axis='rows')
+df_outcomes['Hm_win'] = (df_gamelogs['VisRuns'] > df_gamelogs['VisRuns']).astype(int)
+
+# Rolling number of hits
+df_outcomes['rolling_hits'] = df_outcomes['VisH'].add(df_outcomes['HmH']).to_frame().rolling('360D').mean()
+
 
 # %% Viz
-matplotlib.use('TkAgg')
+
 df_gamelogs['VisScore'].plot(kind='hist', bins=30, alpha=0.5)
+df_outcomes.plot(kind='line', y='rolling_hits')
+
 matplotlib.pyplot.show()
