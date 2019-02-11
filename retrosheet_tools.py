@@ -1,7 +1,12 @@
 # %% Imports
+import math
 import matplotlib
+import numpy as np
 import pandas as pd
+import re
+import sklearn
 import sqlalchemy
+from sspipe import p
 from web_scraper_tools import request_zipped_url
 
 
@@ -207,17 +212,75 @@ df_outcomes['Vis_free'] = df_gamelogs['VisBB'].add(df_gamelogs['VisHBP'])
 df_outcomes['Hm_EBH'] = df_gamelogs['HmD'].add(df_gamelogs['HmT'])
 df_outcomes['Hm_free'] = df_gamelogs['HmBB'].add(df_gamelogs['HmHBP'])
 
-# Normalize by number of outs (number of innings)
-df_outcomes = df_outcomes.divide(df_gamelogs['NumOuts'], axis='rows')
-df_outcomes['Hm_win'] = (df_gamelogs['VisRuns'] > df_gamelogs['VisRuns']).astype(int)
+# Breakdown of hits
+df_vis_hit_dist = (df_outcomes[['VisH', 'Vis_EBH', 'VisHR']]
+                   .divide(df_outcomes[['VisH', 'Vis_EBH', 'VisHR']].sum(axis='columns')
+                           , axis='rows')
+                   )
+
+df_hm_hit_dist = (df_outcomes[['HmH', 'Hm_EBH', 'HmHR']]
+                  .divide(df_outcomes[['HmH', 'Hm_EBH', 'HmHR']].sum(axis='columns')
+                          , axis='rows')
+                  )
+df_vis_hit_dist['VisHR'].plot(kind='hist', bins=10, alpha=0.5)
+df_hm_hit_dist['HmHR'].plot(kind='hist', bins=10, alpha=0.5)
+matplotlib.pyplot.show()
+
+# number of innings
+n_vis_innings, n_hm_innings = (df_gamelogs['NumOuts']
+                               .apply(lambda x: (math.ceil(x/3/2), math.floor(x/3/2)))
+                               | p(lambda x: zip(*x))
+                               | p(list)
+                               )
+
+# Normalize vis team offense by vis innings
+df_vis_norm = (df_outcomes
+               .filter(regex=r'^Vis')
+               .divide(n_vis_innings, axis='rows')
+               )
+
+# Normalize vis team offense by vis innings
+df_hm_norm = (df_outcomes
+              .filter(regex=r'^Hm')
+              .divide(n_hm_innings, axis='rows')
+              )
+
+# Normalized data
+df_outcomes_norm = pd.concat([df_vis_norm, df_hm_norm], axis='columns')
+
+# Home win
+df_outcomes_norm['Hm_win'] = (df_gamelogs['HmRuns'] > df_gamelogs['VisRuns']).astype('int')
+
+test = df_outcomes_norm.describe()
 
 # Rolling number of hits
 df_outcomes['rolling_hits'] = df_outcomes['VisH'].add(df_outcomes['HmH']).to_frame().rolling('360D').mean()
-
+df_outcomes['norm_h']
 
 # %% Viz
-
 df_gamelogs['VisScore'].plot(kind='hist', bins=30, alpha=0.5)
 df_outcomes.plot(kind='line', y='rolling_hits')
 
 matplotlib.pyplot.show()
+
+# %% testing
+dts = pd.date_range(end=pd.datetime.today(), periods=10)
+
+test = (pd.DataFrame(data={'value': np.random.randint(low=1, high=50, size=20).tolist()}
+                     , index=dts.append(dts)
+                     )
+        .sort_index()
+        )
+
+test['mean_3'] = test.rolling(window=3, min_periods=3)['value'].mean()
+test['mean_3d'] = test.rolling(window='3D', min_periods=3)['value'].mean()
+
+test.plot(kind='line')
+matplotlib.pyplot.show()
+
+
+test = pd.DataFrame({'xA': [1, 2, 3], 'xB': [4, 5, 6], 'yC': np.zeros(shape=(3))})
+
+regex = re.compile(r'^x')
+
+test[filter(regex.search, test.columns) | p(list)] = test.filter(regex=r'^y|B$')
