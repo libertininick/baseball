@@ -1,0 +1,21 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+
+[packages]
+matplotlib = "*"
+pandas = "*"
+sspipe = "*"
+sqlalchemy = "*"
+scikit-learn = "*"
+beautifulsoup4 = "*"
+requests = "*"
+seaborn = "*"
+psycopg2 = "*"
+lxml = "*"
+
+[requires]
+python_version = "3.7"
