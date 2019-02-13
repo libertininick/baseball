@@ -101,5 +101,3 @@ def request_zipped_url(file_url):
                     return extracted_file
                 else:
                     return None
-
-#test = request_zipped_url(f'https://www.retrosheet.org/gamelogs/gl2009.zip')

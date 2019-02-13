@@ -254,8 +254,12 @@ df_outcomes_norm['Hm_win'] = (df_gamelogs['HmRuns'] > df_gamelogs['VisRuns']).as
 test = df_outcomes_norm.describe()
 
 # Rolling number of hits
-df_outcomes['rolling_hits'] = df_outcomes['VisH'].add(df_outcomes['HmH']).to_frame().rolling('360D').mean()
-df_outcomes['norm_h']
+df_outcomes_norm['rolling_hits'] = (df_outcomes_norm['VisH']
+                                    .add(df_outcomes_norm['HmH'])
+                                    .to_frame()
+                                    .rolling('360D')
+                                    .mean())
+
 
 # %% Viz
 df_gamelogs['VisScore'].plot(kind='hist', bins=30, alpha=0.5)
