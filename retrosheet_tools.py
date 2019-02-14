@@ -1,6 +1,6 @@
 # %% Imports
 import math
-import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import re
@@ -178,9 +178,9 @@ def parse_line_score(line_score):
 
 # %% Write game logs to SQL DB
 dfs = [gamelogs_to_df(request_zipped_url(f'https://www.retrosheet.org/gamelogs/gl{yr}.zip')) for yr in
-       range(2018, 2019, 1)]
+       range(2015, 2019, 1)]
 df_stack = pd.concat(dfs, axis='rows')
-
+#df_gamelogs = df_stack.copy()
 save_gamelogs_to_sql(df_stack
                      , db_user='baseball_read_write'
                      , db_pass='baseball$3796'
@@ -196,21 +196,13 @@ df_gamelogs = read_gamelogs_from_sql(db_user='baseball_read_write'
                                      , db_table='game_logs')
 
 # %% Game outcome analysis
-fields = ['VisH'
-    , 'VisHR'
-    , 'VisK'
-    , 'VisSB'
-    , 'VisCS'
-    , 'HmH'
-    , 'HmHR'
-    , 'HmK'
-    , 'HmSB'
-    , 'HmCS']
-df_outcomes = df_gamelogs[fields]
-df_outcomes['Vis_EBH'] = df_gamelogs['VisD'].add(df_gamelogs['VisT'])
-df_outcomes['Vis_free'] = df_gamelogs['VisBB'].add(df_gamelogs['VisHBP'])
-df_outcomes['Hm_EBH'] = df_gamelogs['HmD'].add(df_gamelogs['HmT'])
-df_outcomes['Hm_free'] = df_gamelogs['HmBB'].add(df_gamelogs['HmHBP'])
+
+df_outcomes = df_gamelogs[['VisH', 'VisHR', 'VisK', 'VisSB', 'VisCS', 'HmH', 'HmHR', 'HmK', 'HmSB', 'HmCS']]
+
+df_outcomes.loc[:, 'Vis_EBH'] = df_gamelogs.loc[:, 'VisD'].add(df_gamelogs.loc[:, 'VisT'])
+df_outcomes.loc[:, 'Vis_free'] = (df_gamelogs['VisBB'].add(df_gamelogs['VisHBP']))
+df_outcomes.loc[:, 'Hm_EBH'] = df_gamelogs['HmD'].add(df_gamelogs['HmT'])
+df_outcomes.loc[:, 'Hm_free'] = df_gamelogs['HmBB'].add(df_gamelogs['HmHBP'])
 
 # Breakdown of hits
 df_vis_hit_dist = (df_outcomes[['VisH', 'Vis_EBH', 'VisHR']]
@@ -224,7 +216,7 @@ df_hm_hit_dist = (df_outcomes[['HmH', 'Hm_EBH', 'HmHR']]
                   )
 df_vis_hit_dist['VisHR'].plot(kind='hist', bins=10, alpha=0.5)
 df_hm_hit_dist['HmHR'].plot(kind='hist', bins=10, alpha=0.5)
-matplotlib.pyplot.show()
+plt.show()
 
 # number of innings
 n_vis_innings, n_hm_innings = (df_gamelogs['NumOuts']
