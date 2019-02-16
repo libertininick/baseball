@@ -197,29 +197,48 @@ df_gamelogs = read_gamelogs_from_sql(db_user='baseball_read_write'
 
 # %% Game outcome analysis
 
-df_outcomes = df_gamelogs[['VisH', 'VisHR', 'VisK', 'VisSB', 'VisCS', 'HmH', 'HmHR', 'HmK', 'HmSB', 'HmCS']]
+df_outcomes = (df_gamelogs
+               .assign(VisEBH=lambda x: x['VisD'].add(x['VisT'])
+                       , VisS=lambda x: x['VisH'] - x['VisEBH']
+                       , VisBBHBP=lambda x: x['VisBB'].add(x['VisHBP'])
+                       , HmEBH=lambda x: x['HmD'].add(x['HmT'])
+                       , HmS=lambda x: x['HmH'] - x['HmEBH']
+                       , HmBBHBP=lambda x: x['HmBB'].add(x['HmHBP'])
+                       )
+               .loc[:, ['VisS', 'VisEBH', 'VisHR', 'VisK', 'VisBBHBP', 'VisSB', 'VisCS'
+                        , 'HmS', 'HmEBH', 'HmHR', 'HmK', 'HmBBHBP', 'HmSB', 'HmCS']]
+               )
 
-df_outcomes.loc[:, 'Vis_EBH'] = df_gamelogs.loc[:, 'VisD'].add(df_gamelogs.loc[:, 'VisT'])
-df_outcomes.loc[:, 'Vis_free'] = (df_gamelogs['VisBB'].add(df_gamelogs['VisHBP']))
-df_outcomes.loc[:, 'Hm_EBH'] = df_gamelogs['HmD'].add(df_gamelogs['HmT'])
-df_outcomes.loc[:, 'Hm_free'] = df_gamelogs['HmBB'].add(df_gamelogs['HmHBP'])
 
 # Breakdown of hits
-df_vis_hit_dist = (df_outcomes[['VisH', 'Vis_EBH', 'VisHR']]
-                   .divide(df_outcomes[['VisH', 'Vis_EBH', 'VisHR']].sum(axis='columns')
+df_vis_hit_dist = (df_outcomes
+                   .loc[:, ['VisS', 'VisEBH', 'VisHR']]
+                   .divide(df_outcomes[['VisS', 'VisEBH', 'VisHR']].sum(axis='columns')
                            , axis='rows')
                    )
 
-df_hm_hit_dist = (df_outcomes[['HmH', 'Hm_EBH', 'HmHR']]
-                  .divide(df_outcomes[['HmH', 'Hm_EBH', 'HmHR']].sum(axis='columns')
+df_hm_hit_dist = (df_outcomes
+                  .loc[:, ['HmS', 'HmEBH', 'HmHR']]
+                  .divide(df_outcomes[['HmS', 'HmEBH', 'HmHR']].sum(axis='columns')
                           , axis='rows')
                   )
+
+df_hit_dist = pd.concat([df_vis_hit_dist, df_hm_hit_dist], axis='columns')
+df_hit_dist.mean(axis='rows')
+
+ax = (df_hit_dist
+      .filter(regex=r'S$')
+      .groupby(df_hit_dist.index.month)
+      .mean()
+      .plot(kind='line')
+      )
 df_vis_hit_dist['VisHR'].plot(kind='hist', bins=10, alpha=0.5)
 df_hm_hit_dist['HmHR'].plot(kind='hist', bins=10, alpha=0.5)
 plt.show()
 
 # number of innings
-n_vis_innings, n_hm_innings = (df_gamelogs['NumOuts']
+n_vis_innings, n_hm_innings = (df_gamelogs
+                               .loc[:, 'NumOuts']
                                .apply(lambda x: (math.ceil(x/3/2), math.floor(x/3/2)))
                                | p(lambda x: zip(*x))
                                | p(list)
@@ -237,17 +256,47 @@ df_hm_norm = (df_outcomes
               .divide(n_hm_innings, axis='rows')
               )
 
+(df_vis_norm
+ .loc[:, 'VisHR']
+ .groupby(df_vis_norm.index.month)
+ .agg(['count', 'mean', 'std'])
+ .query('Date > 3 & Date < 10')
+ .assign(upper=lambda x: x['mean']+2*x['std']/np.sqrt(x['count'])
+         , lower=lambda x: x['mean']-2*x['std']/np.sqrt(x['count'])
+         )
+ .loc[:, ['mean', 'upper', 'lower']]
+ .plot(kind='line', marker='o')
+ )
+plt.show()
+
 # Normalized data
 df_outcomes_norm = pd.concat([df_vis_norm, df_hm_norm], axis='columns')
 
 # Home win
-df_outcomes_norm['Hm_win'] = (df_gamelogs['HmRuns'] > df_gamelogs['VisRuns']).astype('int')
+df_outcomes_norm['HmWin'] = (df_gamelogs['HmRuns'] > df_gamelogs['VisRuns']).astype('int')
 
-test = df_outcomes_norm.describe()
+summary_stats = df_outcomes_norm.describe()
 
-# Rolling number of hits
-df_outcomes_norm['rolling_hits'] = (df_outcomes_norm['VisH']
-                                    .add(df_outcomes_norm['HmH'])
+ax = (df_outcomes_norm
+      .loc[:, 'HmWin']
+      .groupby(df_vis_norm.index.month)
+      .agg(['count', 'mean', 'std'])
+      .query('Date > 3 and Date < 10')
+      .eval('upper = mean + 2 * std / count**0.5')
+      .eval('lower = mean - 2 * std / count**0.5')
+      .loc[:, ['mean', 'upper', 'lower']]
+      .plot(kind='line', marker='o')
+      )
+
+ax.set_title('Home Team Winning % by Month')
+ax.set_xlabel('Month')
+ax.set_ylabel('% Win')
+
+plt.show()
+
+# Rolling number of singles
+df_outcomes_norm['rolling_hits'] = (df_outcomes_norm['VisS']
+                                    .add(df_outcomes_norm['HmS'])
                                     .to_frame()
                                     .rolling('360D')
                                     .mean())
@@ -257,7 +306,7 @@ df_outcomes_norm['rolling_hits'] = (df_outcomes_norm['VisH']
 df_gamelogs['VisScore'].plot(kind='hist', bins=30, alpha=0.5)
 df_outcomes.plot(kind='line', y='rolling_hits')
 
-matplotlib.pyplot.show()
+plt.show()
 
 # %% testing
 dts = pd.date_range(end=pd.datetime.today(), periods=10)
@@ -272,7 +321,7 @@ test['mean_3'] = test.rolling(window=3, min_periods=3)['value'].mean()
 test['mean_3d'] = test.rolling(window='3D', min_periods=3)['value'].mean()
 
 test.plot(kind='line')
-matplotlib.pyplot.show()
+plt.show()
 
 
 test = pd.DataFrame({'xA': [1, 2, 3], 'xB': [4, 5, 6], 'yC': np.zeros(shape=(3))})
