@@ -7,6 +7,7 @@ import re
 import sklearn
 import sqlalchemy
 from sspipe import p
+import time
 from web_scraper_tools import request_zipped_url
 
 
@@ -196,15 +197,13 @@ df_gamelogs = read_gamelogs_from_sql(db_user='baseball_read_write'
                                      , db_table='game_logs')
 
 # %% Game outcome analysis
-
 df_outcomes = (df_gamelogs
-               .assign(VisEBH=lambda x: x['VisD'].add(x['VisT'])
-                       , VisS=lambda x: x['VisH'] - x['VisEBH']
-                       , VisBBHBP=lambda x: x['VisBB'].add(x['VisHBP'])
-                       , HmEBH=lambda x: x['HmD'].add(x['HmT'])
-                       , HmS=lambda x: x['HmH'] - x['HmEBH']
-                       , HmBBHBP=lambda x: x['HmBB'].add(x['HmHBP'])
-                       )
+               .eval('VisEBH = VisD + VisT')
+               .eval('VisS = VisH - VisEBH')
+               .eval('VisBBHBP = VisBB + VisHBP')
+               .eval('HmEBH = HmD + HmT')
+               .eval('HmS = HmH - HmEBH')
+               .eval('HmBBHBP = HmBB + HmHBP')
                .loc[:, ['VisS', 'VisEBH', 'VisHR', 'VisK', 'VisBBHBP', 'VisSB', 'VisCS'
                         , 'HmS', 'HmEBH', 'HmHR', 'HmK', 'HmBBHBP', 'HmSB', 'HmCS']]
                )
@@ -224,14 +223,8 @@ df_hm_hit_dist = (df_outcomes
                   )
 
 df_hit_dist = pd.concat([df_vis_hit_dist, df_hm_hit_dist], axis='columns')
-df_hit_dist.mean(axis='rows')
+print(df_hit_dist.mean(axis='rows'))
 
-ax = (df_hit_dist
-      .filter(regex=r'S$')
-      .groupby(df_hit_dist.index.month)
-      .mean()
-      .plot(kind='line')
-      )
 df_vis_hit_dist['VisHR'].plot(kind='hist', bins=10, alpha=0.5)
 df_hm_hit_dist['HmHR'].plot(kind='hist', bins=10, alpha=0.5)
 plt.show()
@@ -250,24 +243,28 @@ df_vis_norm = (df_outcomes
                .divide(n_vis_innings, axis='rows')
                )
 
+ax = (df_vis_norm
+      .loc[:, 'VisHR']
+      .groupby(df_vis_norm.index.month)
+      .agg(['count', 'mean', 'std'])
+      .query('Date > 3 & Date < 10')
+      .assign(upper=lambda x: x['mean'] + 2 * x['std'] / np.sqrt(x['count'])
+              , lower=lambda x: x['mean'] - 2 * x['std'] / np.sqrt(x['count'])
+              )
+      .loc[:, ['mean', 'upper', 'lower']]
+      .plot(kind='line', marker='o')
+      )
+ax.set_title('Visiting team HR % by Month')
+ax.set_xlabel('Month')
+ax.set_ylabel('HR %')
+plt.show()
+
 # Normalize vis team offense by vis innings
 df_hm_norm = (df_outcomes
               .filter(regex=r'^Hm')
               .divide(n_hm_innings, axis='rows')
               )
 
-(df_vis_norm
- .loc[:, 'VisHR']
- .groupby(df_vis_norm.index.month)
- .agg(['count', 'mean', 'std'])
- .query('Date > 3 & Date < 10')
- .assign(upper=lambda x: x['mean']+2*x['std']/np.sqrt(x['count'])
-         , lower=lambda x: x['mean']-2*x['std']/np.sqrt(x['count'])
-         )
- .loc[:, ['mean', 'upper', 'lower']]
- .plot(kind='line', marker='o')
- )
-plt.show()
 
 # Normalized data
 df_outcomes_norm = pd.concat([df_vis_norm, df_hm_norm], axis='columns')
@@ -290,16 +287,37 @@ ax = (df_outcomes_norm
 
 ax.set_title('Home Team Winning % by Month')
 ax.set_xlabel('Month')
-ax.set_ylabel('% Win')
+ax.set_ylabel('Win %')
 
 plt.show()
 
-# Rolling number of singles
-df_outcomes_norm['rolling_hits'] = (df_outcomes_norm['VisS']
-                                    .add(df_outcomes_norm['HmS'])
-                                    .to_frame()
-                                    .rolling('360D')
-                                    .mean())
+
+# %% Stabilization of statistics
+stats = df_outcomes.columns[:-1]
+window_sizes = list(range(30, 365*2, 30))
+
+result_dict = dict()
+for stat in ['VisS']: #, 'VisEBH', 'VisHR']
+    result_corr = []
+
+    for size in [20, 50, 100, 150, 200, 400]:
+        print(f'Stat: {stat}; Window: {size}')
+        df_rolling_means = (df_outcomes_norm
+                            .loc[:, stat]
+                            .rolling(window=f'{2*size}D', min_periods=2*size)
+                            #.agg('mean')
+                            .agg([lambda x: x.iloc[0::2].mean(), lambda x: x.iloc[1::2].mean()])
+                            )
+
+        df_rolling_means.plot()
+        plt.show()
+        result_corr.append(df_rolling_means.iloc[:, 0].corr(df_rolling_means.iloc[:, 1]))
+
+    result_dict[stat] = result_corr
+
+t = df_outcomes_norm.groupby('Date')['VisS'].mean()
+t2 = t.groupby(t.index.month).rolling('20D').mean()
+results = pd.DataFrame(result_dict)
 
 
 # %% Viz
