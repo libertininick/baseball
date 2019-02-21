@@ -269,6 +269,8 @@ df_hm_norm = (df_outcomes
 # Normalized data
 df_outcomes_norm = pd.concat([df_vis_norm, df_hm_norm], axis='columns')
 
+# Home league
+df_outcomes_norm['HmTmLg'] = df_gamelogs['HmTmLg']
 # Home win
 df_outcomes_norm['HmWin'] = (df_gamelogs['HmRuns'] > df_gamelogs['VisRuns']).astype('int')
 
@@ -290,6 +292,16 @@ ax.set_xlabel('Month')
 ax.set_ylabel('Win %')
 
 plt.show()
+
+
+# %% Summary stats
+t = (df_outcomes_norm
+     .query('index.dt.month not in [3, 10]')
+     .eval('month = index.dt.month')
+     .groupby(['HmTmLg', 'month'])
+     .mean()
+     )
+
 
 
 # %% Stabilization of statistics
