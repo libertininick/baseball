@@ -16,6 +16,8 @@ requests = "*"
 seaborn = "*"
 psycopg2 = "*"
 lxml = "*"
+statsmodels = "*"
+python-dotenv = "*"
 
 [requires]
 python_version = "3.7"
