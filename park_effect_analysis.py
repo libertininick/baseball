@@ -52,9 +52,9 @@ df_hm_norm = (df_outcomes
 
 # Normalized data
 df_outcomes_norm = (pd.concat([df_vis_norm, df_hm_norm], axis='columns')
-                    .eval('_S = VisS + HmS')
-                    .eval('_EBH = VisEBH + HmEBH')
-                    .eval('_HR = VisHR + HmHR'))
+                    .eval('_S = (VisS + HmS)/2')
+                    .eval('_EBH = (VisEBH + HmEBH)/2')
+                    .eval('_HR = (VisHR + HmHR)/2'))
 
 # Other columns
 df_outcomes_norm['VisTm'] = df_gamelogs['VisTm']
@@ -81,12 +81,13 @@ print(outcome_summary_stats)
 
 # %% Park ids
 park_ids = df_outcomes_norm['ParkID'].unique()
+park_id = 'SAN02'
 
-df_park_all = df_outcomes_norm.loc['2000':'2005', :].query('ParkID == "DEN02"')
+df_park_all = df_outcomes_norm.loc['2000':'2005', :].query('ParkID == @park_id')
 
 matchup_dict = df_park_all['MatchupID'].value_counts().to_dict()
 
-df_other = df_outcomes_norm.loc['2000':'2005', :].query('ParkID != "DEN02"')
+df_other = df_outcomes_norm.loc['2000':'2005', :].query('ParkID != @park_id')
 
 df_other['sample_wt'] = df_other['MatchupID'].apply(lambda x: matchup_dict.get(x, 0))
 
@@ -96,6 +97,18 @@ df_sample = df_other.sample(n=df_park.shape[0], replace=True, weights='sample_wt
 
 ax = df_park['_HR'].plot(kind='hist', alpha=0.5)
 ax = df_sample['_HR'].plot(kind='hist', alpha=0.5)
+plt.show()
+
+df_HR = pd.DataFrame({'park_HR': df_park['_HR'].sort_values().reset_index(drop=True)
+                      , 'baseline_HR': df_sample['_HR'].sort_values().reset_index(drop=True)})
+
+# Model for park
+lm_hr = smf.ols('baseline_HR ~ I(park_HR**3) + I(park_HR**2) + park_HR', data=df_HR).fit()
+print(lm_hr.summary())
+lm_hr.params
+# Plot fit
+df_HR.plot(kind='scatter', x='park_HR', y='baseline_HR')
+plt.plot(np.linspace(0, 0.4, 1000), lm_hr.predict(pd.DataFrame({'park_HR': np.linspace(0, 0.4, 1000)})), color='red')
 plt.show()
 
 park_stats = df_park.filter(regex='^_').mean()
