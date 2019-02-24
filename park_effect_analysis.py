@@ -1,6 +1,7 @@
 import os
 import math
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 import sklearn
@@ -17,7 +18,7 @@ df_gamelogs = read_gamelogs_from_sql(db_user=os.getenv('DB_USER')
                                      , db_name='Baseball'
                                      , db_table='game_logs')
 
-# %% Game outcome analysis
+# %% Game outcome frame
 df_outcomes = (df_gamelogs
                .eval('VisEBH = VisD + VisT')
                .eval('VisS = VisH - VisEBH')
@@ -50,12 +51,22 @@ df_hm_norm = (df_outcomes
               )
 
 # Normalized data
-df_outcomes_norm = pd.concat([df_vis_norm, df_hm_norm], axis='columns')
+df_outcomes_norm = (pd.concat([df_vis_norm, df_hm_norm], axis='columns')
+                    .eval('_S = VisS + HmS')
+                    .eval('_EBH = VisEBH + HmEBH')
+                    .eval('_HR = VisHR + HmHR'))
 
-# Home league
+# Other columns
+df_outcomes_norm['VisTm'] = df_gamelogs['VisTm']
+df_outcomes_norm['HmTm'] = df_gamelogs['HmTm']
+df_outcomes_norm['MatchupID'] = df_gamelogs.apply(lambda row:
+                                                  ((row['HmTm'] + row['VisTm'])
+                                                   if row['HmTm'] <= row['VisTm']
+                                                   else (row['VisTm'] + row['HmTm']))
+                                                  + str(row.name.year)
+                                                  , axis='columns')
+df_outcomes_norm['ParkID'] = df_gamelogs['ParkID']
 df_outcomes_norm['HmTmLg'] = df_gamelogs['HmTmLg']
-
-# Home win
 df_outcomes_norm['HmWin'] = (df_gamelogs['HmRuns'] > df_gamelogs['VisRuns']).astype('int')
 
 # Summary statistics
@@ -66,3 +77,43 @@ outcome_summary_stats = (df_outcomes_norm
                          .mean()
                          )
 print(outcome_summary_stats)
+
+
+# %% Park ids
+park_ids = df_outcomes_norm['ParkID'].unique()
+
+df_park_all = df_outcomes_norm.loc['2000':'2005', :].query('ParkID == "DEN02"')
+
+matchup_dict = df_park_all['MatchupID'].value_counts().to_dict()
+
+df_other = df_outcomes_norm.loc['2000':'2005', :].query('ParkID != "DEN02"')
+
+df_other['sample_wt'] = df_other['MatchupID'].apply(lambda x: matchup_dict.get(x, 0))
+
+sample_matchups = df_other.query('sample_wt > 0')['MatchupID'].unique()
+df_park = df_park_all.query('MatchupID in @sample_matchups')
+df_sample = df_other.sample(n=df_park.shape[0], replace=True, weights='sample_wt')
+
+ax = df_park['_HR'].plot(kind='hist', alpha=0.5)
+ax = df_sample['_HR'].plot(kind='hist', alpha=0.5)
+plt.show()
+
+park_stats = df_park.filter(regex='^_').mean()
+baseline_stats = df_sample.filter(regex='^_').mean()
+park_2_baseline = baseline_stats.div(park_stats)
+
+df_park_adj = df_park.filter(regex='^_').mul(park_2_baseline)
+ax = df_park_adj['_HR'].plot(kind='hist', alpha=0.5)
+ax = df_sample['_HR'].plot(kind='hist', alpha=0.5)
+plt.show()
+
+(df_park
+ .filter(regex='^_')
+ .add_prefix('park')
+ .reset_index()
+ .merge(df_sample
+        .filter(regex='^_')
+        .add_prefix('baseline')
+        .reset_index()
+        , left_index=True, right_index=True)
+ .to_csv(path_or_buf=r'C:\Users\liber\Downloads\park_effect.csv'))
