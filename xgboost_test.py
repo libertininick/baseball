@@ -4,12 +4,15 @@ import numpy as np
 import sklearn
 import xgboost as xgb
 
-df = (pd.DataFrame({'x1': np.random.normal(0, 1, 1000)
-                   , 'x2': np.random.normal(-1, 2, 1000)
-                   , 'x3': np.random.normal(0, 1, 1000)*np.random.normal(0, 1, 1000)
+n_examples = 10000
+df = (pd.DataFrame({'x1': np.random.normal(0, 1, n_examples)
+                   , 'x2': np.random.normal(-1, 2, n_examples)
+                   , 'x3': np.random.normal(0, 1, n_examples)*np.random.normal(0, 1, n_examples)
+                    , 'x4': np.random.normal(0, 1, n_examples)
                    }
                   )
-      .eval('y = 3*x1*x2 - x3**2 + 0.5*x2')
+      .eval('y = 3*x1*x2 - x3**2 + 0.5*x2 + x4')
+      .drop(['x4'], axis='columns')
       )
 
 
@@ -50,17 +53,26 @@ def split(arr, sections):
 
 
 def loss_fxn(errors, sections=5):
-    split_errors = split(errors, sections)
 
-    split_mse = [np.mean(e**2) for e in split_errors]
+    # Absolute value of errors vs. squared errors
+    abs_errors = np.abs(errors)
 
-    split_ranks = np.array(split_mse).argsort().argsort() + 1
+    # Split errors into sections
+    split_errors = split(abs_errors, sections)
 
-    split_scaled_se = [(e**2)*r for e, r in zip(split_errors, split_ranks)]
+    # Mean absolute error of each section
+    split_mae = [np.mean(section) for section in split_errors]
 
-    denom = np.sum([e.shape[0]*r for e, r in zip(split_errors, split_ranks)])
+    # Rank sections by mae
+    split_ranks = np.array(split_mae).argsort().argsort() + 1
 
-    return np.concatenate(split_scaled_se)/denom
+    # Apply rank scale to each absolute error based on its section
+    split_scaled_ae = [section*rank for section, rank in zip(split_errors, split_ranks)]
+
+    # Rescaling denom to normalize for ranking
+    rescale_denom = np.sum([section.shape[0]*rank for section, rank in zip(split_errors, split_ranks)])/errors.shape[0]
+
+    return np.concatenate(split_scaled_ae)/rescale_denom
 
 
 def custom_obj_fxn(y_preds, y_true):
@@ -87,7 +99,7 @@ def custom_eval_fxn(y_preds, dm_y_true):
 
     errors = y_true - y_preds
 
-    return 'custom_mse', np.sum(loss_fxn(errors))
+    return 'custom_mae', np.mean(loss_fxn(errors))
 
 
 # Initialize XGBoost regression model
@@ -102,6 +114,20 @@ xgb_reg_model.fit(X_train, y_train
                   , eval_metric=custom_eval_fxn
                   , verbose=True)
 
+df_progress = pd.concat([pd.DataFrame(xgb_reg_model.evals_result()['validation_0']).add_suffix('_train')
+                            , pd.DataFrame(xgb_reg_model.evals_result()['validation_1']).add_suffix('_test')]
+                        , axis='columns')
 
-xgb.plot_importance(xgb_reg_model)
+plt.style.use('seaborn-colorblind')
+f, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=True)
+(df_progress
+ .filter(regex='^custom_mae')
+ .plot(ax=ax1, kind='line')
+ )
+
+(df_progress
+ .filter(regex='^rmse')
+ .plot(ax=ax2, kind='line')
+ )
+
 plt.show()
