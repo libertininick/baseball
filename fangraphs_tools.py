@@ -1,6 +1,8 @@
 # %% Imports
 import bs4
+import itertools
 import matplotlib
+import numpy as np
 import pandas as pd
 import requests
 import seaborn as sns
@@ -8,6 +10,31 @@ from web_scraper_tools import html_table_to_df
 
 
 # %% Functions
+def calc_series(opp_list):
+    # Tuple opponent list
+    opp_list_t = [(o, 1) for o in opp_list]
+
+    # Accumulate series
+    series = list(itertools.accumulate(opp_list_t, lambda acc, x: acc if acc[0] == x[0] else (x[0], acc[1] + 1)))
+
+    # Return series list
+    return [y for (x, y) in series]
+
+
+def series_state(series):
+    n = series.shape[0]
+    series['Series_len'] = n
+    series['Game'] = np.arange(n) + 1
+    series['Team_wins'] = series['Win'].cumsum()
+    series['Opp_wins'] = (1 - series['Win']).cumsum()
+
+    series_state = [str(t) + '-' + str(o) for t, o in zip(series['Team_wins'], series['Opp_wins'])]
+    series['Series_state_pre'] = ['0-0'] + series_state[:-1]
+    series['Series_state_post'] = series_state
+
+    return series
+
+
 def fangraphs_win_prob(seasons, teams=[], verbose=False):
     """
     Scrapes win probabilities and outcomes from Fangraphs.com
@@ -105,6 +132,8 @@ def fangraphs_win_prob(seasons, teams=[], verbose=False):
                         # Home/Away
                         df['Location'] = [{'at': 'Away', 'vs': 'Home'}.get(x, None) for x in df['']]
 
+                        df['Series'] = calc_series(df['Opp'])
+
                         # Win/Loss
                         df['Win'] = [{'W': 1, 'L': 0}.get(x, None) for x in df['W/L']]
 
@@ -114,19 +143,65 @@ def fangraphs_win_prob(seasons, teams=[], verbose=False):
                         # Runs allowed
                         df['Runs_allowed'] = pd.to_numeric(df['OppRuns'], errors='coerce')
 
-                        df_list.append(df[['Team', 'Opp', 'Win_prob', 'Win', 'Runs_scored', 'Runs_allowed']])
+                        df_sub = df[['Team'
+                            , 'Opp'
+                            , 'Location'
+                            , 'Series'
+                            , 'Win_prob'
+                            , 'Win'
+                            , 'Runs_scored'
+                            , 'Runs_allowed']]
+
+                        # Calc series stats
+                        df_sub = df_sub.groupby('Series').apply(series_state)
+
+                        df_list.append(df_sub)
 
     return pd.concat(df_list, axis='rows')
 
 
 # %% Fangraphs win probability analysis
 df_win_prob = fangraphs_win_prob(seasons=list(range(2015, 2019, 1))
-                                 , teams=['orioles', 'redsox', 'whitesox']
+                                 #, teams=['orioles', 'redsox', 'whitesox']
                                  , verbose=True
                                  )
 
+# %% CSV
 # astype('float64')
 # df_win_prob.to_csv('C:\\Users\\Nick\\Dropbox\\Baseball\\win_prob.csv')
+df_win_prob = pd.read_csv('C:\\Users\\Nick\\Dropbox\\Baseball\\win_prob.csv'
+                          , header=0
+                          , index_col='Date'
+                          , parse_dates=['Date'])
+
+# %% Team winning percentage by year
+df_team_win_pct = df_win_prob.groupby([df_win_prob.index.year, 'Team']).agg({'Win': 'mean'})
+
+
+# %% Series outcomes
+sweep_win_3g = 'Series_len == 3 & Game == 3 & Series_state_pre == "2-0"'
+sweep_loss_3g = 'Series_len == 3 & Game == 3 & Series_state_pre == "0-2"'
+
+sweep_win_4g = 'Series_len == 4 & Game == 4 & Series_state_pre == "3-0"'
+sweep_loss_4g = 'Series_len == 4 & Game == 4 & Series_state_pre == "0-3"'
+
+sweep_win = '(' + sweep_win_3g + ') | (' + sweep_win_4g + ')'
+sweep_loss = '(' + sweep_loss_3g + ') | (' + sweep_loss_4g + ')'
+
+
+baseline = df_win_prob.groupby(['Location']).agg({'Win': ['count', 'mean']})
+
+sweep_win_prob = (df_win_prob
+                  .query(sweep_win)
+                  .groupby(['Location'])
+                  .agg({'Win': ['count', 'mean']})
+                  )
+
+sweep_loss_prob = (df_win_prob
+                   .query(sweep_loss)
+                   .groupby(['Location'])
+                   .agg({'Win': ['count', 'mean']})
+                   )
 
 # %% Viz
 df_win_prob['Year'] = df_win_prob.index.year
