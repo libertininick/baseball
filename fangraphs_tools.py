@@ -7,43 +7,46 @@ import os
 import pandas as pd
 import requests
 import seaborn as sns
-from web_scraper_tools import html_table_to_df
+from web_scraper_tools import html_table_to_df, request_zipped_url
+from retrosheet_tools import gamelogs_to_df
 
 # %% Set plotting styles
 plt.style.use('seaborn-colorblind')
 
 
 # %% Info
-team_info = {'BAL': {'Name': 'Baltimore Orioles', 'Short_name': 'Orioles', 'FG_name': 'orioles', 'Abbreviation':  'BAL', 'League': 'AL', 'Division': 'East'}
-    , 'BOS': {'Name': 'Boston Red Sox', 'Short_name': 'Red Sox', 'FG_name': 'redsox', 'Abbreviation':  'BOS', 'League': 'AL', 'Division': 'East'}
-    , 'CHW': {'Name': 'Chicago White Sox', 'Short_name': 'White Sox', 'FG_name': 'whitesox', 'Abbreviation':  'CHW', 'League': 'AL', 'Division': 'Central'}
-    , 'CLE': {'Name': 'Cleveland Indians', 'Short_name': 'Indians', 'FG_name': 'indians', 'Abbreviation':  'CLE', 'League': 'AL', 'Division': 'Central'}
-    , 'DET': {'Name': 'Detroit Tigers', 'Short_name': 'Tigers', 'FG_name': 'tigers', 'Abbreviation':  'DET', 'League': 'AL', 'Division': 'Central'}
-    , 'HOU': {'Name': 'Houston Astros', 'Short_name': 'Astros', 'FG_name': 'astros', 'Abbreviation':  'HOU', 'League': 'AL', 'Division': 'West'}
-    , 'KCR': {'Name': 'Kansas City Royals', 'Short_name': 'Royals', 'FG_name': 'royals', 'Abbreviation':  'KCR', 'League': 'AL', 'Division': 'Central'}
-    , 'LAA': {'Name': 'Los Angeles Angels', 'Short_name': 'Angels', 'FG_name': 'angels', 'Abbreviation':  'LAA', 'League': 'AL', 'Division': 'West'}
-    , 'MIN': {'Name': 'Minnesota Twins', 'Short_name': 'Twins', 'FG_name': 'twins', 'Abbreviation':  'MIN', 'League': 'AL', 'Division': 'Central'}
-    , 'NYY': {'Name': 'New York Yankees', 'Short_name': 'Yankees', 'FG_name': 'yankees', 'Abbreviation':  'NYY', 'League': 'AL', 'Division': 'East'}
-    , 'OAK': {'Name': 'Oakland Athletics', 'Short_name': 'Athletics', 'FG_name': 'athletics', 'Abbreviation':  'OAK', 'League': 'AL', 'Division': 'West'}
-    , 'SEA': {'Name': 'Seattle Mariners', 'Short_name': 'Mariners', 'FG_name': 'mariners', 'Abbreviation':  'SEA', 'League': 'AL', 'Division': 'West'}
-    , 'TBR': {'Name': 'Tampa Bay Rays', 'Short_name': 'Rays', 'FG_name': 'rays', 'Abbreviation':  'TBR', 'League': 'AL', 'Division': 'East'}
-    , 'TEX': {'Name': 'Texas Rangers', 'Short_name': 'Rangers', 'FG_name': 'rangers', 'Abbreviation':  'TEX', 'League': 'AL', 'Division': 'West'}
-    , 'TOR': {'Name': 'Toronto Blue Jays', 'Short_name': 'Blue Jays', 'FG_name': 'bluejays', 'Abbreviation':  'TOR', 'League': 'AL', 'Division': 'East'}
-    , 'ARI': {'Name': 'Arizona Diamondbacks', 'Short_name': 'Diamondbacks', 'FG_name': 'diamondbacks', 'Abbreviation':  'ARI', 'League': 'NL', 'Division': 'West'}
-    , 'ATL': {'Name': 'Atlanta Braves', 'Short_name': 'Braves', 'FG_name': 'braves', 'Abbreviation':  'ATL', 'League': 'NL', 'Division': 'East'}
-    , 'CHC': {'Name': 'Chicago Cubs', 'Short_name': 'Cubs', 'FG_name': 'cubs', 'Abbreviation':  'CHC', 'League': 'NL', 'Division': 'Central'}
-    , 'CIN': {'Name': 'Cincinnati Reds', 'Short_name': 'Reds', 'FG_name': 'reds', 'Abbreviation':  'CIN', 'League': 'NL', 'Division': 'Central'}
-    , 'COL': {'Name': 'Colorado Rockies', 'Short_name': 'Rockies', 'FG_name': 'rockies', 'Abbreviation':  'COL', 'League': 'NL', 'Division': 'West'}
-    , 'LAD': {'Name': 'Los Angeles Dodgers', 'Short_name': 'Dodgers', 'FG_name': 'dodgers', 'Abbreviation':  'LAD', 'League': 'NL', 'Division': 'West'}
-    , 'MIA': {'Name': 'Miami Marlins', 'Short_name': 'Marlins', 'FG_name': 'marlins', 'Abbreviation':  'MIA', 'League': 'NL', 'Division': 'East'}
-    , 'MIL': {'Name': 'Milwaukee Brewers', 'Short_name': 'Brewers', 'FG_name': 'brewers', 'Abbreviation':  'MIL', 'League': 'NL', 'Division': 'Central'}
-    , 'NYM': {'Name': 'New York Mets', 'Short_name': 'Mets', 'FG_name': 'mets', 'Abbreviation':  'NYM', 'League': 'NL', 'Division': 'East'}
-    , 'PHI': {'Name': 'Philadelphia Phillies', 'Short_name': 'Phillies', 'FG_name': 'phillies', 'Abbreviation':  'PHI', 'League': 'NL', 'Division': 'East'}
-    , 'PIT': {'Name': 'Pittsburgh Pirates', 'Short_name': 'Pirates', 'FG_name': 'pirates', 'Abbreviation':  'PIT', 'League': 'NL', 'Division': 'Central'}
-    , 'SDP': {'Name': 'San Diego Padres', 'Short_name': 'Padres', 'FG_name': 'padres', 'Abbreviation':  'SDP', 'League': 'NL', 'Division': 'West'}
-    , 'SFG': {'Name': 'San Francisco Giants', 'Short_name': 'Giants', 'FG_name': 'giants', 'Abbreviation':  'SFG', 'League': 'NL', 'Division': 'West'}
-    , 'STL': {'Name': 'St. Louis Cardinals', 'Short_name': 'Cardinals', 'FG_name': 'cardinals', 'Abbreviation':  'STL', 'League': 'NL', 'Division': 'Central'}
-    , 'WSN': {'Name': 'Washington Nationals', 'Short_name': 'Nationals', 'FG_name': 'nationals', 'Abbreviation':  'WSN', 'League': 'NL', 'Division': 'East'}}
+team_info = {'BAL': {'Name': 'Baltimore Orioles', 'Short_name': 'Orioles', 'FG_name': 'orioles', 'Abbreviation':  'BAL', 'Retro_tm': 'BAL', 'League': 'AL', 'Division': 'East'}
+    , 'BOS': {'Name': 'Boston Red Sox', 'Short_name': 'Red Sox', 'FG_name': 'redsox', 'Abbreviation':  'BOS', 'Retro_tm': 'BOS', 'League': 'AL', 'Division': 'East'}
+    , 'CHW': {'Name': 'Chicago White Sox', 'Short_name': 'White Sox', 'FG_name': 'whitesox', 'Abbreviation':  'CHW', 'Retro_tm': 'CHA', 'League': 'AL', 'Division': 'Central'}
+    , 'CLE': {'Name': 'Cleveland Indians', 'Short_name': 'Indians', 'FG_name': 'indians', 'Abbreviation':  'CLE', 'Retro_tm': 'CLE', 'League': 'AL', 'Division': 'Central'}
+    , 'DET': {'Name': 'Detroit Tigers', 'Short_name': 'Tigers', 'FG_name': 'tigers', 'Abbreviation':  'DET', 'Retro_tm': 'DET', 'League': 'AL', 'Division': 'Central'}
+    , 'HOU': {'Name': 'Houston Astros', 'Short_name': 'Astros', 'FG_name': 'astros', 'Abbreviation':  'HOU', 'Retro_tm': 'HOU', 'League': 'AL', 'Division': 'West'}
+    , 'KCR': {'Name': 'Kansas City Royals', 'Short_name': 'Royals', 'FG_name': 'royals', 'Abbreviation':  'KCR', 'Retro_tm': 'KCA', 'League': 'AL', 'Division': 'Central'}
+    , 'LAA': {'Name': 'Los Angeles Angels', 'Short_name': 'Angels', 'FG_name': 'angels', 'Abbreviation':  'LAA', 'Retro_tm': 'ANA', 'League': 'AL', 'Division': 'West'}
+    , 'MIN': {'Name': 'Minnesota Twins', 'Short_name': 'Twins', 'FG_name': 'twins', 'Abbreviation':  'MIN', 'Retro_tm': 'MIN', 'League': 'AL', 'Division': 'Central'}
+    , 'NYY': {'Name': 'New York Yankees', 'Short_name': 'Yankees', 'FG_name': 'yankees', 'Abbreviation':  'NYY', 'Retro_tm': 'NYA', 'League': 'AL', 'Division': 'East'}
+    , 'OAK': {'Name': 'Oakland Athletics', 'Short_name': 'Athletics', 'FG_name': 'athletics', 'Abbreviation':  'OAK', 'Retro_tm': 'OAK', 'League': 'AL', 'Division': 'West'}
+    , 'SEA': {'Name': 'Seattle Mariners', 'Short_name': 'Mariners', 'FG_name': 'mariners', 'Abbreviation':  'SEA', 'Retro_tm': 'SEA', 'League': 'AL', 'Division': 'West'}
+    , 'TBR': {'Name': 'Tampa Bay Rays', 'Short_name': 'Rays', 'FG_name': 'rays', 'Abbreviation':  'TBR', 'Retro_tm': 'TBA', 'League': 'AL', 'Division': 'East'}
+    , 'TEX': {'Name': 'Texas Rangers', 'Short_name': 'Rangers', 'FG_name': 'rangers', 'Abbreviation':  'TEX', 'Retro_tm': 'TEX', 'League': 'AL', 'Division': 'West'}
+    , 'TOR': {'Name': 'Toronto Blue Jays', 'Short_name': 'Blue Jays', 'FG_name': 'bluejays', 'Abbreviation':  'TOR', 'Retro_tm': 'TOR', 'League': 'AL', 'Division': 'East'}
+    , 'ARI': {'Name': 'Arizona Diamondbacks', 'Short_name': 'Diamondbacks', 'FG_name': 'diamondbacks', 'Abbreviation':  'ARI', 'Retro_tm': 'ARI', 'League': 'NL', 'Division': 'West'}
+    , 'ATL': {'Name': 'Atlanta Braves', 'Short_name': 'Braves', 'FG_name': 'braves', 'Abbreviation':  'ATL', 'Retro_tm': 'ATL', 'League': 'NL', 'Division': 'East'}
+    , 'CHC': {'Name': 'Chicago Cubs', 'Short_name': 'Cubs', 'FG_name': 'cubs', 'Abbreviation':  'CHC', 'Retro_tm': 'CHN', 'League': 'NL', 'Division': 'Central'}
+    , 'CIN': {'Name': 'Cincinnati Reds', 'Short_name': 'Reds', 'FG_name': 'reds', 'Abbreviation':  'CIN', 'Retro_tm': 'CIN', 'League': 'NL', 'Division': 'Central'}
+    , 'COL': {'Name': 'Colorado Rockies', 'Short_name': 'Rockies', 'FG_name': 'rockies', 'Abbreviation':  'COL', 'Retro_tm': 'COL', 'League': 'NL', 'Division': 'West'}
+    , 'LAD': {'Name': 'Los Angeles Dodgers', 'Short_name': 'Dodgers', 'FG_name': 'dodgers', 'Abbreviation':  'LAD', 'Retro_tm': 'LAN', 'League': 'NL', 'Division': 'West'}
+    , 'MIA': {'Name': 'Miami Marlins', 'Short_name': 'Marlins', 'FG_name': 'marlins', 'Abbreviation':  'MIA', 'Retro_tm': 'MIA', 'League': 'NL', 'Division': 'East'}
+    , 'MIL': {'Name': 'Milwaukee Brewers', 'Short_name': 'Brewers', 'FG_name': 'brewers', 'Abbreviation':  'MIL', 'Retro_tm': 'MIL', 'League': 'NL', 'Division': 'Central'}
+    , 'NYM': {'Name': 'New York Mets', 'Short_name': 'Mets', 'FG_name': 'mets', 'Abbreviation':  'NYM', 'Retro_tm': 'NYN', 'League': 'NL', 'Division': 'East'}
+    , 'PHI': {'Name': 'Philadelphia Phillies', 'Short_name': 'Phillies', 'FG_name': 'phillies', 'Abbreviation':  'PHI', 'Retro_tm': 'PHI', 'League': 'NL', 'Division': 'East'}
+    , 'PIT': {'Name': 'Pittsburgh Pirates', 'Short_name': 'Pirates', 'FG_name': 'pirates', 'Abbreviation':  'PIT', 'Retro_tm': 'PIT', 'League': 'NL', 'Division': 'Central'}
+    , 'SDP': {'Name': 'San Diego Padres', 'Short_name': 'Padres', 'FG_name': 'padres', 'Abbreviation':  'SDP', 'Retro_tm': 'SDN', 'League': 'NL', 'Division': 'West'}
+    , 'SFG': {'Name': 'San Francisco Giants', 'Short_name': 'Giants', 'FG_name': 'giants', 'Abbreviation':  'SFG', 'Retro_tm': 'SFN', 'League': 'NL', 'Division': 'West'}
+    , 'STL': {'Name': 'St. Louis Cardinals', 'Short_name': 'Cardinals', 'FG_name': 'cardinals', 'Abbreviation':  'STL', 'Retro_tm': 'SLN', 'League': 'NL', 'Division': 'Central'}
+    , 'WSN': {'Name': 'Washington Nationals', 'Short_name': 'Nationals', 'FG_name': 'nationals', 'Abbreviation':  'WSN', 'Retro_tm': 'WAS', 'League': 'NL', 'Division': 'East'}}
+
+
 
 park_info = {'BAL': {'Park': 'Oriole Park at Camden Yards', 'Address': '333 West Camden Street, Baltimore, MD 21201', 'Capacity': 45971, 'Turf':  'Grass', 'Roof': 'Open', 'LF': 337, 'CF': 406, 'RF': 320, 'LF_area': 27100, 'CF_area': 34400, 'RF_area': 26300}
     , 'BOS': {'Park': 'Fenway Park', 'Address': '4 Yawkey Way, Boston, MA 2215', 'Capacity': 37673, 'Turf':  'Grass', 'Roof': 'Open', 'LF': 310, 'CF': 420, 'RF': 302, 'LF_area': 21100, 'CF_area': 32800, 'RF_area': 29600}
@@ -105,13 +108,14 @@ def series_state(series):
     return series
 
 
-def fangraphs_win_prob(seasons, teams=[], verbose=False):
+def fgh_game_data(seasons, teams=[], timeout=5., verbose=False):
     """
-    Scrapes win probabilities and outcomes from Fangraphs.com
+    Scrapes historical game level data from Fangraphs.com
 
     Args:
         seasons (list): list of years
         teams (list): list of team abbreviations
+        timeout (float): seconds for http request timeout
         verbose (bool): whether to print status update for every (team, season). Default = False
 
     Returns:
@@ -121,19 +125,38 @@ def fangraphs_win_prob(seasons, teams=[], verbose=False):
     if len(teams) == 0:
         teams = team_info.keys()
 
-
-
     df_list = []
     failure_log = []
     with requests.Session() as session:
-        # session.auth = ('username', getpass())
-        for team in teams:
-            for season in seasons:
+
+        # Authenticate session
+        with open(f'C:\\Users\\{os.getlogin()}\\Dropbox\\Baseball\\fangraphs.txt') as f:
+            session.auth = ('libertininick', f.readlines()[0])
+
+        for season in seasons:
+            # Download retrosheet data
+            df_retro = gamelogs_to_df(request_zipped_url(f'https://www.retrosheet.org/gamelogs/gl{season}.zip'))
+            df_retro['Year'] = df_retro.index.year
+            df_retro['Month'] = df_retro.index.month
+            df_retro['Day'] = df_retro.index.day
+
+            for team in teams:
 
                 # GET request
-                response = session.get(f'https://www.fangraphs.com/teams/{team_info[team]["FG_name"]}/schedule?season={season}'
-                                       , timeout=3.05
-                                       )
+                try:
+                    response = session.get(f'https://www.fangraphs.com/teams/{team_info[team]["FG_name"]}/schedule?season={season}'
+                                           , timeout=timeout
+                                           )
+                except:
+                    print('Failure :' + str(season) + '-' + team)
+                    failure_log.append((season, team))
+
+                # with open(f'C:\\Users\\{os.getlogin()}\\Dropbox\\Baseball\\fangraphs.txt') as f:
+                #     response = requests.get(
+                #         f'https://www.fangraphs.com/teams/{team_info[team]["FG_name"]}/schedule?season={season}'
+                #         , auth=('libertininick', f.readlines()[0])
+                #         , timeout=3.05
+                #         )
 
                 if response:
                     if response.status_code == 200:
@@ -153,7 +176,7 @@ def fangraphs_win_prob(seasons, teams=[], verbose=False):
                         # Convert table to DataFrame
                         df = html_table_to_df(html_table)
 
-                        # Date index
+                        # Date
                         df['Date'] = (df['Date']
                                       .str
                                       .extract(pat=r'([a-zA-Z]{3}\s[0-9]{1,2},\s[0-9]{4})', expand=False)
@@ -161,7 +184,8 @@ def fangraphs_win_prob(seasons, teams=[], verbose=False):
 
                         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
                         df['Year'] = df['Date'].dt.year
-                        df['Month'] = df['Date'].dt.year
+                        df['Month'] = df['Date'].dt.month
+                        df['Day'] = df['Date'].dt.day
                         df['Weekday'] = df['Date'].dt.weekday
                         df['Season_progress'] = (df.index + 1) / len(df.index)
                         df.set_index('Date', inplace=True)
@@ -169,8 +193,7 @@ def fangraphs_win_prob(seasons, teams=[], verbose=False):
                         # Win probability column
                         win_prob = df.filter(regex=(".*Win Prob"))
                         df['Win_prob'] = (pd.to_numeric(win_prob.iloc[:, 0]
-                                                        .str.replace(pat='%', repl=''), errors='coerce')) \
-                            .divide(100.)
+                                                        .str.replace(pat='%', repl=''), errors='coerce')).divide(100.)
 
                         # Team name column
                         df['Team'] = team
@@ -185,6 +208,8 @@ def fangraphs_win_prob(seasons, teams=[], verbose=False):
 
                         # Home/Away
                         df['Location'] = [{'at': 'Away', 'vs': 'Home'}.get(x, None) for x in df['']]
+                        df['VisTm'] = [team_info[team]['Retro_tm'] if loc == 'Away' else team_info[opp]['Retro_tm'] for loc, opp in zip(df['Location'], df['Opp'])]
+                        df['HmTm'] = [team_info[team]['Retro_tm'] if loc == 'Home' else team_info[opp]['Retro_tm'] for loc, opp in zip(df['Location'], df['Opp'])]
 
                         # Game type
                         division_game = (df['Team_league'] == df['Opp_league']) & (df['Team_division'] == df['Opp_division'])
@@ -197,56 +222,85 @@ def fangraphs_win_prob(seasons, teams=[], verbose=False):
                         # Win/Loss
                         df['Win'] = [{'W': 1, 'L': 0}.get(x, None) for x in df['W/L']]
 
-                        # Runs scored
+                        # Runs
                         df['Runs_scored'] = pd.to_numeric(df[team + 'Runs'], errors='coerce')
-
-                        # Runs allowed
                         df['Runs_allowed'] = pd.to_numeric(df['OppRuns'], errors='coerce')
 
+                        df['VisRuns'] = [rs if loc == 'Away' else ra for loc, rs, ra in zip(df['Location']
+                                                                                            , df['Runs_scored']
+                                                                                            , df['Runs_allowed'])]
+                        df['HmRuns'] = [rs if loc == 'Home' else ra for loc, rs, ra in zip(df['Location']
+                                                                                           , df['Runs_scored']
+                                                                                           , df['Runs_allowed'])]
+
                         df_sub = df[['Year'
-                                    , 'Month'
-                                    , 'Weekday'
-                                    , 'Team'
-                                    , 'Team_league'
-                                    , 'Team_division'
-                                    , 'Season_progress'
-                                    , 'Opp'
-                                    , 'Opp_league'
-                                    , 'Opp_division'
-                                    , 'Location'
-                                    , 'Game_type'
-                                    , 'Series'
-                                    , 'Win_prob'
-                                    , 'Win'
-                                    , 'Runs_scored'
-                                    , 'Runs_allowed']]
+                            , 'Month'
+                            , 'Day'
+                            , 'Weekday'
+                            , 'Team'
+                            , 'Team_league'
+                            , 'Team_division'
+                            , 'Season_progress'
+                            , 'Opp'
+                            , 'Opp_league'
+                            , 'Opp_division'
+                            , 'Location'
+                            , 'Game_type'
+                            , 'Series'
+                            , 'Win_prob'
+                            , 'Win'
+                            , 'Runs_scored'
+                            , 'Runs_allowed'
+                            , 'VisTm'
+                            , 'HmTm'
+                            , 'VisRuns'
+                            , 'HmRuns'
+                                     ]]
 
                         # Calc series stats
                         df_sub = df_sub.groupby('Series').apply(series_state)
 
-                        df_list.append(df_sub)
+                        # Join with retro data
+                        try:
+                            df_sub = (df_sub
+                                      .reset_index()
+                                      .merge(df_retro
+                                             , how='inner'
+                                             , on=['Year', 'Month', 'Day', 'VisTm', 'HmTm', 'VisRuns', 'HmRuns']
+                                             )
+                                      .set_index('Date')
+                                      )
 
-    return pd.concat(df_list, axis='rows')
+                            df_list.append(df_sub)
+
+                        except:
+                            print('Failure :' + str(season) + '-' + team)
+                            failure_log.append((season, team))
+                    else:
+                        print('Failure :' + str(season) + '-' + team)
+                        failure_log.append((season, team))
+
+    return pd.concat(df_list, axis='rows'), failure_log
 
 
 # %% Fangraphs win probability download
-df_win_prob = fangraphs_win_prob(seasons=list(range(2015, 2019, 1))
-                                 #, teams=['BAL', 'BOS', 'ATL', 'CHC']
-                                 , verbose=True
-                                 )
+df_fg, log = fgh_game_data(seasons=list(range(2014, 2019, 1))
+                           #, teams=['BAL', 'BOS', 'ATL', 'CHC']
+                           , verbose=True
+                           )
 
-df_win_prob.info()
+df_fg.info()
 
 # %% CSV
-df_win_prob = pd.read_csv(f'C:\\Users\\{os.getlogin()}\\Dropbox\\Baseball\\win_prob.csv'
-                          , header=0
-                          , index_col='Date'
-                          , parse_dates=['Date'])
-# df_win_prob.to_csv('C:\\Users\\Nick\\Dropbox\\Baseball\\win_prob.csv')
+df_fg = pd.read_csv(f'C:\\Users\\{os.getlogin()}\\Dropbox\\Baseball\\fangraphs_game_data.csv'
+                    , header=0
+                    , index_col='Date'
+                    , parse_dates=['Date'])
+# df_fg.to_csv('C:\\Users\\Nick\\Dropbox\\Baseball\\fangraphs_game_data.txt')
 
 
 # %% Team winning percentage by year
-df_team_win_pct = df_win_prob.groupby([df_win_prob.index.year, 'Team']).agg({'Win': 'mean'})
+df_team_win_pct = df_fg.groupby(['Year', 'Team']).agg({'Win': 'mean'})
 
 # Plot
 fig, ax = plt.subplots(figsize=(8, 4))
@@ -267,7 +321,8 @@ df_team_win_pct.plot(ax=ax
                      , color='blue'
                      )
 
-ax.set_title(label='Distribution of season winning percentage\n2015-2018'
+ax.set_title(label=f'Distribution of season winning percentage\n'
+f'{df_team_win_pct.index.get_level_values("Year").min()}-{df_team_win_pct.index.get_level_values("Year").max()}'
              , loc='left'
              , fontdict={'fontsize': 12}
              )
@@ -288,7 +343,7 @@ plt.show()
 
 
 # %% Sweep analysis
-df_win_prob['Series_len'].value_counts()
+df_fg['Series_len'].value_counts()
 sweep_win_3g = 'Series_len == 3 & Game == 3 & Series_state_pre == "2-0"'
 sweep_loss_3g = 'Series_len == 3 & Game == 3 & Series_state_pre == "0-2"'
 
@@ -299,7 +354,7 @@ sweep_win = '(' + sweep_win_3g + ') | (' + sweep_win_4g + ')'
 sweep_loss = '(' + sweep_loss_3g + ') | (' + sweep_loss_4g + ')'
 
 # Sweep counts by year
-sweeps_by_year = (df_win_prob
+sweeps_by_year = (df_fg
                   .eval('Year = index.dt.year')
                   .query(sweep_win)
                   .groupby(['Year', 'Location', 'Series_len'])
@@ -307,26 +362,25 @@ sweeps_by_year = (df_win_prob
                   )
 
 
-baseline = df_win_prob.groupby(['Location']).agg({'Win': ['count', 'mean']})
+baseline = df_fg.groupby(['Location']).agg({'Win': ['count', 'mean']})
 
-sweep_win_prob = (df_win_prob
+sweep_win_prob = (df_fg
                   .query(sweep_win)
                   .groupby(['Location'])
                   .agg({'Win': ['count', 'mean']})
                   )
 
-sweep_loss_prob = (df_win_prob
+sweep_loss_prob = (df_fg
                    .query(sweep_loss)
                    .groupby(['Location'])
                    .agg({'Win': ['count', 'mean']})
                    )
 
 # %% Viz
-df_win_prob['Year'] = df_win_prob.index.year
-g = sns.FacetGrid(data=df_win_prob, row='Year')
+g = sns.FacetGrid(data=df_fg, row='Year')
 g.map(sns.regplot, x='Win_prob'
       , y='Win'
       , x_bins=30
-      , data=df_win_prob)
+      , data=df_fg)
 plt.plot([0.2, 0.8], [0.2, 0.8])
 plt.show()
