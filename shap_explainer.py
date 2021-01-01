@@ -138,7 +138,9 @@ class SHAPExplainer():
             reference_values (ndarray): Reference or baseline value to compare each feature against (n_feats,)
 
         Returns:
-            values (DataFrame): SHAP value for each feature for each observation in inputs x
+            output (dict):
+                 features (DataFrame): Input feature values
+                 shap_values (DataFrame): SHAP value for each feature for each observation in inputs
         """
 
         # Compute SHAP values for each row
@@ -147,16 +149,20 @@ class SHAPExplainer():
             model_evals = self._evaluate_model(row, reference_values)
             values.append(self._est_feature_impacts(model_evals))
 
-        # Result DataFrame
+        # Result DataFrames
+        inputs = pd.DataFrame(x)
         values = pd.DataFrame(values)
         values = values[sorted(values.columns)]
         if self.var_names:
-            inputs.columns = self.var_name
+            inputs.columns = self.var_names
             values.columns = self.var_names
             
         values['total'] = np.sum(values, axis=1)
         yh = self.prediction_fxn(x)
         values['yh'] = yh
 
-        return values
+        return {
+            'features': inputs,
+            'shap_values': values,
+        }
         
