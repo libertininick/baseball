@@ -6,11 +6,11 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.6.0
+#       jupytext_version: 1.8.0
 #   kernelspec:
-#     display_name: Python [conda env:baseball_env] *
+#     display_name: baseball_env
 #     language: python
-#     name: conda-env-baseball_env-py
+#     name: baseball_env
 # ---
 
 # # Imports
@@ -425,21 +425,30 @@ fig, ax = plt.subplots(figsize=(10,5))
 _ = ax.plot(pd.Series(losses).rolling(window=100).mean())
 
 torch.save(model.state_dict(), '../models/mlb_explainer.pth')
-
-
 # -
 
 # # Eval
 
+# + [markdown] heading_collapsed=true
+# ## Load trained model
+
+# + hidden=true
+model = MLBExplainer(
+    input_maps=input_maps,
+    target_sizes={k: v['Vis'].shape[1] for k, v in target_dfs.items()}
+)
+model.load_state_dict( torch.load('../models/mlb_explainer.pth'))
+model.eval()
+
+
+# -
+
+# ## Eval model on all data
+
+# +
 def sigmoid(x):
     return 1/(1 + np.exp(-x))
 
-
-# model = MLBExplainer(input_maps, 15)
-# model.load_state_dict( torch.load('../models/mlb_explainer.pth'))
-model.eval()
-
-# +
 y, yh = defaultdict(list), defaultdict(list)
 
 for i in range(0, len(df_subset)//1000 + 1):
@@ -460,9 +469,6 @@ for i in range(0, len(df_subset)//1000 + 1):
 
 y = {k: np.concatenate(v, axis=0) for k, v in y.items()}
 yh = {k: np.concatenate(v, axis=0) for k, v in yh.items()}
-
-
-
 # -
 
 # ## Win Probability
@@ -479,10 +485,10 @@ outcome_avg = np.mean(outcome)
 proba_avg = np.mean(yh_proba)
 pred_avg = np.mean(yh_proba >= 0.5)
 accuracy = np.mean(outcome == (yh_proba >= 0.5))
-print(f'{outcome_avg:.2%}')
-print(f'{proba_avg:.2%}')
-print(f'{pred_avg:.2%}')
-print(f'{accuracy:.2%}')
+print(f'''Data set's win probability : {outcome_avg:.2%}''')
+print(f'''Model's predicted proba    : {proba_avg:.2%}''')
+print(f'''Model's predicted win proba: {pred_avg:.2%}''')
+print(f'''Model's prediction accuracy: {accuracy:.2%}''')
 
 # +
 from sklearn.metrics import precision_recall_fscore_support
@@ -524,48 +530,11 @@ ax.set_ylabel("Fraction of positives")
 ax.set_ylim([-0.05, 1.05])
 ax.legend(loc="lower right")
 ax.set_title('Calibration plot')
-
-
 # -
 
 # # SHAP
 
-# +
-@torch.no_grad()
-def predict_win_prob(x):
-    model.eval()
-    yh = model(x).numpy()
-    p = sigmoid(yh[:, -1])
-    return p
-
-@torch.no_grad()
-def predict_runs_scored(x):
-    model.eval()
-    yh = model(x).numpy()
-    runs = np.exp(yh[:, 0])
-    return runs
-
-@torch.no_grad()
-def predict_runs_allowed(x):
-    model.eval()
-    yh = model(x).numpy()
-    runs = np.exp(yh[:, 1])
-    return runs
-
-@torch.no_grad()
-def predict_total_runs(x):
-    model.eval()
-    yh = model(x).numpy()
-    runs = np.exp(yh[:, :2])
-    return np.sum(runs, axis=1)
-
-
-# -
-
-explainer = SHAPExplainer(
-    prediction_fxn=predict_runs_allowed,
-    n_feats=14,
-    var_names= [
+input_features = [
     'year',
     'month',
     'dow',
@@ -580,24 +549,58 @@ explainer = SHAPExplainer(
     'pitcher',
     'manager',
     'home_away',
-    ]
+]
+
+
+# ## Model Wrappers
+
+@torch.no_grad()
+def predict_win_prob(x):
+    model.eval()
+    yhs = model(x)
+    yh = yhs['Win'].numpy()
+    p = sigmoid(yh)
+    return p
+
+
+# ## Explainers
+
+win_prob_explainer = SHAPExplainer(
+    prediction_fxn=predict_win_prob,
+    n_feats=len(input_features),
+    var_names=input_features
 )
 
-x, y = get_sample(df_subset, n=5000, mask_p=0)
-sv = explainer.shap_values(x, np.zeros(14))
+# ## Explain a sample of games
+
+x, targets = get_sample(df_subset, target_dfs, n=500, mask_p=0)
+baselines =  np.zeros(14)
+x.shape
+
+win_prob_sv = win_prob_explainer.shap_values(x, baselines)
+win_prob_sv['shap_values']
 
 # ## Global feature impact
 
+sv = win_prob_sv['shap_values'].iloc[:,:-2].values
+var_names = np.array(win_prob_sv['shap_values'].columns)[:-2]
+
 # +
-feature_impact = np.average(np.abs(sv[explainer.var_names]),axis=0)
+feature_impact = np.mean(np.abs(sv), axis=0)
 feature_impact_p = feature_impact/np.sum(feature_impact)
 
+# Sort features largest ABS impact to smallest
 sort_idxs = np.argsort(feature_impact)
+sv = np.abs(sv[:, sort_idxs])
+var_names = var_names[sort_idxs]
 
+# +
+# Plot
 fig, ax = plt.subplots(figsize=(15,10))
 
 boxplot = ax.boxplot(
-    np.abs(sv[np.array(explainer.var_names)[sort_idxs]].values),
+    sv,
+    labels=var_names,
     sym='',                                 # No fliers
     whis=(5, 95),                           # 5% and 95% whiskers
     widths=0.8,
@@ -624,61 +627,49 @@ _ = ax.set_xticklabels([f'{x:.0%}' for x in ax.get_xticks()])
 _ = ax.grid(which='major', axis='x', linestyle='--')
 
 _ = ax.set_yticks(np.arange(len(feature_impact)) + 1)
-_ = ax.set_yticklabels(np.array(explainer.var_names)[sort_idxs])
 # -
 
-
-# ## Single feature sensitivity
-
-sv.groupby(x['home_away'])['home_away'].mean()
-
-x
 
 # ## Local feature impact
 
+row = win_prob_sv['shap_values'].iloc[0][:14].sort_values()
+row
+
 # +
-r = sv.iloc[0][:15].sort_values()
+values = [0] + list(row)
+labels = [''] + list(row.index)
+n = len(values)
+idx = np.arange(n)
 
 fig, ax = plt.subplots(figsize=(7,10))
-_ = ax.barh(np.arange(16), 
-            width=[0] + list(r), 
-            color=['blue' if x >= 0 else 'red' for x in [0] + list(r)],
+
+# Feature impact bars
+_ = ax.barh(idx, 
+            width=values, 
+            color=['blue' if x >= 0 else 'red' for x in values],
             height=1, 
             alpha=0.5
            )
-_ = ax.plot([0] + list(np.cumsum(r)), 
-            np.arange(16),
-#             color=['blue' if x >= 0 else 'red' for x in [0] + list(np.cumsum(r))],
-            marker='o'
-           )
 
-# _ = ax.plot([0] + list(np.cumsum(r)), np.arange(16), marker='o')
+# Cumulative impact line
+_ = ax.plot(
+    np.cumsum(values), 
+    idx,
+    color='black',
+    alpha=0.5,
+    marker='o',
+)
+
 _ = ax.axvline(x=0, color='black', linestyle='--')
+total_impact = np.sum(values)
+_ = ax.axvline(
+    x=total_impact, 
+    color='blue' if total_impact >= 0 else 'red', 
+    linestyle='--'
+)
 
-_ = ax.set_yticks(np.arange(16))
-_ = ax.set_yticklabels([''] + list(r.index), fontsize=16, color='slategray')
+_ = ax.set_yticks(idx)
+_ = ax.set_yticklabels(labels, fontsize=16, color='slategray')
 # -
-
-fig, ax = plt.subplots(figsize=(10,5))
-_ = ax.hist(sv['home_away'])
-
-
-
-league_map = {v: k  for k, v in input_maps['leagues'].items()}
-pd.DataFrame({'league': np.vectorize(league_map.get)(x[:,6]), 
-              'sv': sv['league']
-             }).groupby('league').mean().sort_values('sv')
-
-year_map = {v: k  for k, v in input_maps['years'].items()}
-pd.DataFrame({'year': np.vectorize(year_map.get)(x[:,1]), 
-              'sv': sv['year']
-             }).groupby('year').mean().sort_values('sv')
-
-park_map = {v: k  for k, v in input_maps['parks'].items()}
-pd.DataFrame({'park': np.vectorize(park_map.get)(x[:,5]), 
-              'sv': sv['park']
-             }).groupby('park').mean().sort_values('sv')
-
-
 
 
