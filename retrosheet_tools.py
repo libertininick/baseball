@@ -1,13 +1,209 @@
-# %% Imports
+
+import io
+import zipfile
+
 import pandas as pd
-import sqlalchemy
-from web_scraper_tools import request_zipped_url
+import requests
 
 
-# %% Functions
-def gamelogs_to_df(extracted_file):
+GAME_LOG_COLS = [
+    'Date', 
+    'DblHdr', 
+    'Day', 
+    'VisTm', 
+    'VisTmLg',
+    'VisTmGNum', 
+    'HmTm', 
+    'HmTmLg', 
+    'HmTmGNum', 
+    'VisRuns', 
+    'HmRuns',
+    'NumOuts', 
+    'DayNight', 
+    'Completion', 
+    'Forfeit', 
+    'Protest', 
+    'ParkID',
+    'Attendance', 
+    'Duration', 
+    'VisLine', 
+    'HmLine', 
+    'VisAB', 
+    'VisH',
+    'VisD', 
+    'VisT', 
+    'VisHR', 
+    'VisRBI', 
+    'VisSH', 
+    'VisSF', 
+    'VisHBP',
+    'VisBB', 
+    'VisIBB', 
+    'VisK', 
+    'VisSB', 
+    'VisCS', 
+    'VisGDP', 
+    'VisCI',
+    'VisLOB', 
+    'VisPs', 
+    'VisER', 
+    'VisTER', 
+    'VisWP', 
+    'VisBalks', 
+    'VisPO',
+    'VisA', 
+    'VisE', 
+    'VisPassed', 
+    'VisDB', 
+    'VisTP', 
+    'HmAB', 
+    'HmH',
+    'HmD', 
+    'HmT', 
+    'HmHR', 
+    'HmRBI', 
+    'HmSH', 
+    'HmSF', 
+    'HmHBP', 
+    'HmBB',
+    'HmIBB', 
+    'HmK', 
+    'HmSB', 
+    'HmCS', 
+    'HmGDP', 
+    'HmCI', 
+    'HmLOB', 
+    'HmPs',
+    'HmER', 
+    'HmTER', 
+    'HmWP', 
+    'HmBalks', 
+    'HmPO', 
+    'HmA', 
+    'HmE', 
+    'HmPass',
+    'HmDB', 
+    'HmTP', 
+    'UmpHID', 
+    'UmpHNm', 
+    'Ump1BID', 
+    'Ump1BNm', 
+    'Ump2BID',
+    'Ump2BNm', 
+    'Ump3BID', 
+    'Ump3BNm', 
+    'UmpLFID', 
+    'UmpLFNm', 
+    'UmpRFID',
+    'UmpRFNm', 
+    'VisMgrID', 
+    'VisMgrNm', 
+    'HmMgrID', 
+    'HmMgrNm', 
+    'WinPID',
+    'WinPNm', 
+    'PID', 
+    'PNAme', 
+    'SavePID', 
+    'SavePNm', 
+    'GWinRBIID',
+    'GWinRBINm', 
+    'VisStPchID', 
+    'VisStPchNm', 
+    'HmStPchID', 
+    'HmStPchNm',
+    'VisBat1ID', 
+    'VisBat1Nm', 
+    'VisBat1Pos', 
+    'VisBat2ID', 
+    'VisBat2Nm',
+    'VisBat2Pos', 
+    'VisBat3ID', 
+    'VisBat3Nm', 
+    'VisBat3Pos', 
+    'VisBat4ID',
+    'VisBat4Nm', 
+    'VisBat4Pos', 
+    'VisBat5ID', 
+    'VisBat5Nm', 
+    'VisBat5Pos',
+    'VisBat6ID', 
+    'VisBat6Nm', 
+    'VisBat6Pos', 
+    'VisBat7ID', 
+    'VisBat7Nm',
+    'VisBat7Pos', 
+    'VisBat8ID', 
+    'VisBat8Nm', 
+    'VisBat8Pos', 
+    'VisBat9ID',
+    'VisBat9Nm', 
+    'VisBat9Pos', 
+    'HmBat1ID', 
+    'HmBat1Nm', 
+    'HmBat1Pos',
+    'HmBat2ID', 
+    'HmBat2Nm', 
+    'HmBat2Pos', 
+    'HmBat3ID', 
+    'HmBat3Nm',
+    'HmBat3Pos', 
+    'HmBat4ID', 
+    'HmBat4Nm', 
+    'HmBat4Pos', 
+    'HmBat5ID',
+    'HmBat5Nm', 
+    'HmBat5Pos', 
+    'HmBat6ID', 
+    'HmBat6Nm', 
+    'HmBat6Pos',
+    'HmBat7ID', 
+    'HmBat7Nm', 
+    'HmBat7Pos', 
+    'HmBat8ID', 
+    'HmBat8Nm',
+    'HmBat8Pos', 
+    'HmBat9ID', 
+    'HmBat9Nm', 
+    'HmBat9Pos', 
+    'Additional',
+     'Acquisition'
+]
+
+
+def _get_zipped_url(file_url):
+    """Downloads and extracts a file from a zipped url
+
+    Args:
+     file_url (str): url file path of zipped file
+
+    Returns:
+        extracted_file
     """
-    Converts an extracted Retrosheet gamelog from get_zip to a pandas DataFrame
+
+    # GET request for url
+    with requests.Session() as session:
+        response = session.get(file_url, timeout=(5, 30))
+
+        if response:
+            if response.status_code == 200:
+                # Unzip http response
+                content = zipfile.ZipFile(io.BytesIO(response.content))
+
+                # Files in zipped package
+                files = content.namelist()
+
+                # Extract
+                if len(files) == 1:
+                    file_name = files.pop()
+                    extracted_file = content.open(file_name)
+                    return extracted_file
+                else:
+                    return None
+
+
+def _gamelogs_to_df(extracted_file):
+    """Converts an extracted Retrosheet gamelog from get_zip to a pandas DataFrame
 
     Args:
         extracted_file (str)
@@ -15,169 +211,66 @@ def gamelogs_to_df(extracted_file):
     Returns:
         df (DataFrame)
     """
-    col_names = ['Date', 'DblHdr', 'Day', 'VisTm', 'VisTmLg',
-                 'VisTmGNum', 'HmTm', 'HmTmLg', 'HmTmGNum', 'VisRuns', 'HmRuns',
-                 'NumOuts', 'DayNight', 'Completion', 'Forfeit', 'Protest', 'ParkID',
-                 'Attendance', 'Duration', 'VisLine', 'HmLine', 'VisAB', 'VisH',
-                 'VisD', 'VisT', 'VisHR', 'VisRBI', 'VisSH', 'VisSF', 'VisHBP',
-                 'VisBB', 'VisIBB', 'VisK', 'VisSB', 'VisCS', 'VisGDP', 'VisCI',
-                 'VisLOB', 'VisPs', 'VisER', 'VisTER', 'VisWP', 'VisBalks', 'VisPO',
-                 'VisA', 'VisE', 'VisPassed', 'VisDB', 'VisTP', 'HmAB', 'HmH',
-                 'HmD', 'HmT', 'HmHR', 'HmRBI', 'HmSH', 'HmSF', 'HmHBP', 'HmBB',
-                 'HmIBB', 'HmK', 'HmSB', 'HmCS', 'HmGDP', 'HmCI', 'HmLOB', 'HmPs',
-                 'HmER', 'HmTER', 'HmWP', 'HmBalks', 'HmPO', 'HmA', 'HmE', 'HmPass',
-                 'HmDB', 'HmTP', 'UmpHID', 'UmpHNm', 'Ump1BID', 'Ump1BNm', 'Ump2BID',
-                 'Ump2BNm', 'Ump3BID', 'Ump3BNm', 'UmpLFID', 'UmpLFNm', 'UmpRFID',
-                 'UmpRFNm', 'VisMgrID', 'VisMgrNm', 'HmMgrID', 'HmMgrNm', 'WinPID',
-                 'WinPNm', 'PID', 'PNAme', 'SavePID', 'SavePNm', 'GWinRBIID',
-                 'GWinRBINm', 'VisStPchID', 'VisStPchNm', 'HmStPchID', 'HmStPchNm',
-                 'VisBat1ID', 'VisBat1Nm', 'VisBat1Pos', 'VisBat2ID', 'VisBat2Nm',
-                 'VisBat2Pos', 'VisBat3ID', 'VisBat3Nm', 'VisBat3Pos', 'VisBat4ID',
-                 'VisBat4Nm', 'VisBat4Pos', 'VisBat5ID', 'VisBat5Nm', 'VisBat5Pos',
-                 'VisBat6ID', 'VisBat6Nm', 'VisBat6Pos', 'VisBat7ID', 'VisBat7Nm',
-                 'VisBat7Pos', 'VisBat8ID', 'VisBat8Nm', 'VisBat8Pos', 'VisBat9ID',
-                 'VisBat9Nm', 'VisBat9Pos', 'HmBat1ID', 'HmBat1Nm', 'HmBat1Pos',
-                 'HmBat2ID', 'HmBat2Nm', 'HmBat2Pos', 'HmBat3ID', 'HmBat3Nm',
-                 'HmBat3Pos', 'HmBat4ID', 'HmBat4Nm', 'HmBat4Pos', 'HmBat5ID',
-                 'HmBat5Nm', 'HmBat5Pos', 'HmBat6ID', 'HmBat6Nm', 'HmBat6Pos',
-                 'HmBat7ID', 'HmBat7Nm', 'HmBat7Pos', 'HmBat8ID', 'HmBat8Nm',
-                 'HmBat8Pos', 'HmBat9ID', 'HmBat9Nm', 'HmBat9Pos', 'Additional',
-                 'Acquisition']
+    
+    df = pd.read_csv(
+        extracted_file, 
+        header=None, 
+        names=GAME_LOG_COLS, 
+        parse_dates=['Date'], 
+    )
 
-    df = pd.read_csv(extracted_file
-                     , header=None
-                     , names=col_names
-                     , parse_dates=['Date']
-                     , index_col=['Date']
-                     )
+    # Add custom stats
+    df = (
+        df
+        .eval('Year = Date.dt.year')
+        .eval('Month = Date.dt.month')
+        .eval('DOY = Date.dt.dayofyear')
+        .eval('VisPA = VisAB + VisSH + VisSF + VisHBP + VisBB + VisIBB + VisCI')   # VisTm plate appearances
+        .eval('HmPA = HmAB + HmSH + HmSF + HmHBP + HmBB + HmIBB + HmCI')           # HmTm plate appearances
+        .eval('VisBIP = VisAB - VisK + VisSF')                                     # VisTm balls in play
+        .eval('HmBIP = HmAB - HmK + HmSF')                                         # HmTm balls in play
+        .eval('VisBIPp = VisBIP/VisAB')                                            # VisTm balls in play %
+        .eval('HmBIPp = HmBIP/HmAB')                                               # HmTm balls in play %
+        .eval('VisS = VisH - VisD - VisT - VisHR')                                 # VisTm singles
+        .eval('HmS = HmH - HmD - HmT - HmHR')                                      # HmTm singles
+        .eval('VisSp = VisS/VisBIP')                                               # VisTm single %
+        .eval('HmSp = HmS/HmBIP')                                                  # HmTm single %
+        .eval('VisDp = VisD/VisBIP')                                               # VisTm double %
+        .eval('HmDp = HmD/HmBIP')                                                  # HmTm double %
+        .eval('VisTp = VisT/VisBIP')                                               # VisTm triple %
+        .eval('HmTp = HmT/HmBIP')                                                  # HmTm triple %
+        .eval('VisHRp = VisHR/VisBIP')                                             # VisTm HR %
+        .eval('HmHRp = HmHR/HmBIP')                                                # HmTm HR %
+        .eval('VisKp = VisK/VisPA')                                                # VisTm K %
+        .eval('HmKp = HmK/HmPA')                                                   # VisTm K %
+        .eval('VisBBp = (VisBB + VisIBB)/VisPA')                                   # VisTm BB %
+        .eval('HmBBp = (HmBB + HmIBB)/HmPA')                                       # VisTm BB %
+    )
+
+    # Team + year identifiers
+    df['VisTmYr'] = df['VisTm'] + df['Year'].astype(str)
+    df['HmTmYr'] = df['HmTm'] + df['Year'].astype(str)
+
     return df
 
 
-def save_gamelogs_to_sql(df
-                         , db_user
-                         , db_pass
-                         , db_name
-                         , db_table
-                         , db_engine_type='postgresql+psycopg2'
-                         , db_host='localhost'
-                         , db_port=5432
-                         , if_exists='fail'
-                         ):
-    """
-    Writes a gamelog DataFrame to SQL db
-
+def get_gamelogs(years):
+    """Downloads Retrosheet gamelogs for a set of years
+    
     Args:
-        df (DataFrame): data to be written
-        db_engine_type (str): SQL database engine
-        db_user (str): database username
-        db_pass (str): database password
-        db_name (str): database name/schema
-        db_table (str): table to write data to
-        if_exists (str): action to take if table exists in schema  {‘fail’, ‘replace’, ‘append’}, default ‘fail’
-        db_host (str): database host
-        db_port (int): database port
-
-    Returns:
-        None
-
-    """
-
-    # Create a SQLalchemy Postgre engine
-    connection_string = f'{db_engine_type}://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}'
-    engine = sqlalchemy.create_engine(connection_string, echo=False)
-
-    # Write dataframe to SQL
-    df.to_sql(name=db_table, con=engine, if_exists=if_exists, index=True)
-
-    # Dispose of SQL engine
-    engine.dispose()
-
-    return None
-
-
-def extract_save_gamelogs(yrs
-                          , db_user
-                          , db_pass
-                          , db_name
-                          , db_table
-                          , db_engine_type='postgresql+psycopg2'
-                          , db_host='localhost'
-                          , db_port=5432
-                          , if_exists='fail'):
-    """
-        Extracts gamelogs from Retrosheet and then writes to SQL db
-
-        Args:
-            yrs (list): list of years to load data for
-            db_engine_type (str): SQL database engine
-            db_user (str): database username
-            db_pass (str): database password
-            db_name (str): database name/schema
-            db_table (str): table to write data to
-            if_exists (str): action to take if table exists in schema  {‘fail’, ‘replace’, ‘append’}, default ‘fail’
-            db_host (str): database host
-            db_port (int): database port
-
-        Returns:
-            None
-
-        """
-
-    # Load data frames from Retrosheet
-    dfs = [gamelogs_to_df(request_zipped_url(f'https://www.retrosheet.org/gamelogs/gl{yr}.zip')) for yr in yrs]
-
-    return save_gamelogs_to_sql(pd.concat(dfs, axis='rows')
-                                , db_user=db_user
-                                , db_pass=db_pass
-                                , db_name=db_name
-                                , db_table=db_table
-                                , db_engine_type=db_engine_type
-                                , db_host=db_host
-                                , db_port=db_port
-                                , if_exists=if_exists
-                                )
-
-
-def read_gamelogs_from_sql(db_user
-                           , db_pass
-                           , db_name
-                           , db_table
-                           , db_engine_type='postgresql+psycopg2'
-                           , db_host='localhost'
-                           , db_port=5432
-                           ):
-    """
-    Reads gamelogs from SQL db to DataFrame
-
-    Args:
-        db_engine_type (str): SQL database engine
-        db_user (str): database username
-        db_pass (str): database password
-        db_name (str): database name/schema
-        db_table (str): table to write data to
-        db_host (str): database host
-        db_port (int): database port
+        years (list)
 
     Returns:
         df_gamelogs (DataFrame)
-
     """
-
-    # Create a SQLalchemy Postgre engine
-    connection_string = f'{db_engine_type}://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}'
-    engine = sqlalchemy.create_engine(connection_string, echo=False)
-
-    # SQL expression
-    sql_expression = f'SELECT * FROM {db_table}'
-
-    # Read from SQL
-    df_gamelogs = pd.read_sql(sql_expression, engine, index_col='Date')
-
-    # Convert index to datetime
-    df_gamelogs.index = pd.to_datetime(df_gamelogs.index, utc=True)
-
-    # Dispose of SQL engine
-    engine.dispose()
+    df_gamelogs = pd.concat(
+        [
+            _gamelogs_to_df(_get_zipped_url(f'https://www.retrosheet.org/gamelogs/gl{yr}.zip')) 
+            for yr 
+            in years
+        ], 
+        axis='rows'
+    )
 
     return df_gamelogs
 
@@ -211,18 +304,3 @@ def parse_line_score(line_score):
             run_char = ''
 
     return runs_per_inning
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
