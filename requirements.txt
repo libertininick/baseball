@@ -1,0 +1,12 @@
+beautifulsoup4
+ipykernel
+jupyter
+jupytext
+jupyter-contrib-nbextensions
+matplotlib
+numpy==1.19.3
+pandas
+requests
+scipy
+scikit-learn
+torch
