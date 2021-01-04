@@ -366,8 +366,10 @@ class MLBExplainer(nn.Module):
         return yh
 
 
+# + [markdown] heading_collapsed=true
 # # Loss function
 
+# + hidden=true
 bce = nn.BCEWithLogitsLoss()
 def loss_fxn(yh, y, device=None):
     losses = []
@@ -382,8 +384,10 @@ def loss_fxn(yh, y, device=None):
     return sum(losses)/(len(losses) + 9)
 
 
+# + [markdown] heading_collapsed=true
 # # Training
 
+# + hidden=true
 model = MLBExplainer(
     input_maps=input_maps,
     target_sizes={k: v['Vis'].shape[1] for k, v in target_dfs.items()}
@@ -391,11 +395,12 @@ model = MLBExplainer(
 optimizer = torch.optim.Adam(params=model.parameters(), lr=0.0005)
 model
 
+# + hidden=true
 x, y = get_sample(df_subset, target_dfs, n=128)
 yh = model(x)
 loss_fxn(yh, y)
 
-# +
+# + hidden=true
 model.train()
 
 batch_size = 128
@@ -425,6 +430,8 @@ fig, ax = plt.subplots(figsize=(10,5))
 _ = ax.plot(pd.Series(losses).rolling(window=100).mean())
 
 torch.save(model.state_dict(), '../models/mlb_explainer.pth')
+
+
 # -
 
 # # Eval
@@ -433,6 +440,9 @@ torch.save(model.state_dict(), '../models/mlb_explainer.pth')
 # ## Load trained model
 
 # + hidden=true
+def sigmoid(x):
+    return 1/(1 + np.exp(-x))
+
 model = MLBExplainer(
     input_maps=input_maps,
     target_sizes={k: v['Vis'].shape[1] for k, v in target_dfs.items()}
@@ -440,15 +450,10 @@ model = MLBExplainer(
 model.load_state_dict( torch.load('../models/mlb_explainer.pth'))
 model.eval()
 
-
-# -
-
+# + [markdown] heading_collapsed=true
 # ## Eval model on all data
 
-# +
-def sigmoid(x):
-    return 1/(1 + np.exp(-x))
-
+# + hidden=true
 y, yh = defaultdict(list), defaultdict(list)
 
 for i in range(0, len(df_subset)//1000 + 1):
@@ -469,15 +474,16 @@ for i in range(0, len(df_subset)//1000 + 1):
 
 y = {k: np.concatenate(v, axis=0) for k, v in y.items()}
 yh = {k: np.concatenate(v, axis=0) for k, v in yh.items()}
-# -
 
+# + [markdown] heading_collapsed=true
 # ## Win Probability
 
+# + hidden=true
 # Win probability
 fig, ax = plt.subplots(figsize=(10,5))
 _ = ax.hist(yh['Win'])
 
-# +
+# + hidden=true
 outcome = y['Win']
 yh_proba = yh['Win']
 
@@ -490,7 +496,7 @@ print(f'''Model's predicted proba    : {proba_avg:.2%}''')
 print(f'''Model's predicted win proba: {pred_avg:.2%}''')
 print(f'''Model's prediction accuracy: {accuracy:.2%}''')
 
-# +
+# + hidden=true
 from sklearn.metrics import precision_recall_fscore_support
 
 p,r,f = [], [], []
@@ -516,7 +522,7 @@ axs[1].set_title(label='F-score Curve', loc='left', fontdict={'fontsize': 16})
 axs[1].set_xlabel('Prediction Threshold', fontsize=16)
 axs[1].set_ylabel('F-Score', fontsize=16)
 
-# +
+# + hidden=true
 from sklearn.calibration import calibration_curve
 
 fig, ax = plt.subplots(figsize=(8, 8))
@@ -567,109 +573,43 @@ def predict_win_prob(x):
 
 win_prob_explainer = SHAPExplainer(
     prediction_fxn=predict_win_prob,
-    n_feats=len(input_features),
+    baseline_values = np.zeros(len(input_features)),
     var_names=input_features
 )
 
+win_prob_explainer.yh_baseline.item()
+
 # ## Explain a sample of games
 
-x, targets = get_sample(df_subset, target_dfs, n=500, mask_p=0)
-baselines =  np.zeros(14)
-x.shape
+# +
+x, targets = get_sample(df_subset, target_dfs, n=50, mask_p=0)
 
-win_prob_sv = win_prob_explainer.shap_values(x, baselines)
+x.shape
+# -
+
+win_prob_sv = win_prob_explainer.shap_values(x)
 win_prob_sv['shap_values']
 
 # ## Global feature impact
 
-sv = win_prob_sv['shap_values'].iloc[:,:-2].values
-var_names = np.array(win_prob_sv['shap_values'].columns)[:-2]
-
-# +
-feature_impact = np.mean(np.abs(sv), axis=0)
-feature_impact_p = feature_impact/np.sum(feature_impact)
-
-# Sort features largest ABS impact to smallest
-sort_idxs = np.argsort(feature_impact)
-sv = np.abs(sv[:, sort_idxs])
-var_names = var_names[sort_idxs]
-
-# +
-# Plot
-fig, ax = plt.subplots(figsize=(15,10))
-
-boxplot = ax.boxplot(
-    sv,
-    labels=var_names,
-    sym='',                                 # No fliers
-    whis=(5, 95),                           # 5% and 95% whiskers
-    widths=0.8,
-    vert=False,                             # Horizontal plot
-    patch_artist=True,                      # Need this flag to color boxes
-    boxprops=dict(facecolor=(0,0,0,0.10)),  # Color faces black with 10% alpha
-)
-
-# Color median line
-_ = plt.setp(boxplot['medians'], color='red')
-
-# Add mean points
-_ = ax.plot(
-    feature_impact[sort_idxs],
-    np.arange(len(feature_impact)) + 1, 
-    linewidth=0,
-    marker='D', 
-    markersize=5,
-    markerfacecolor='k',
-    markeredgecolor='k'
-)
-_ = ax.set_xticks(np.linspace(0,1,11))
+fig, ax = win_prob_explainer.plot_global_impact(win_prob_sv['shap_values'], False, "Win Probability")
 _ = ax.set_xticklabels([f'{x:.0%}' for x in ax.get_xticks()])
-_ = ax.grid(which='major', axis='x', linestyle='--')
-
-_ = ax.set_yticks(np.arange(len(feature_impact)) + 1)
-# -
-
 
 # ## Local feature impact
 
-row = win_prob_sv['shap_values'].iloc[0][:14].sort_values()
-row
+fig, ax = win_prob_explainer.plot_local_impact(
+    obs=win_prob_sv['shap_values'].iloc[5],
+    target_name="Win Probability"
+)
 
 # +
-values = [0] + list(row)
-labels = [''] + list(row.index)
-n = len(values)
-idx = np.arange(n)
-
-fig, ax = plt.subplots(figsize=(7,10))
-
-# Feature impact bars
-_ = ax.barh(idx, 
-            width=values, 
-            color=['blue' if x >= 0 else 'red' for x in values],
-            height=1, 
-            alpha=0.5
-           )
-
-# Cumulative impact line
-_ = ax.plot(
-    np.cumsum(values), 
-    idx,
-    color='black',
-    alpha=0.5,
-    marker='o',
+fig, ax = win_prob_explainer.plot_local_impact(
+    obs=win_prob_sv['shap_values'].iloc[5],
+    ref_obs=win_prob_sv['shap_values'].iloc[3],
+    target_name="Win Probability",
+    
 )
-
-_ = ax.axvline(x=0, color='black', linestyle='--')
-total_impact = np.sum(values)
-_ = ax.axvline(
-    x=total_impact, 
-    color='blue' if total_impact >= 0 else 'red', 
-    linestyle='--'
-)
-
-_ = ax.set_yticks(idx)
-_ = ax.set_yticklabels(labels, fontsize=16, color='slategray')
 # -
+
 
 

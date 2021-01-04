@@ -2,6 +2,7 @@ from collections import defaultdict
 import itertools
 import math
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -21,21 +22,29 @@ class SHAPExplainer():
     Estimations of SHAP values implemented in a model agnostic way. 
     """
     
-    def __init__(self, prediction_fxn, n_feats, var_names=None, max_evals=2048):
+    def __init__(self, prediction_fxn, baseline_values, var_names=None, max_evals=2048):
         """
         Args:
             prediction_fxn (function): Wrapper for model's prediction
-            n_feats (int): Number of input features to be explained
+            baseline_values (ndarray): Baseline value to use for each feature (n_feats,)
             var_names (list): Input feature names
             max_evals (int): Maximum number of model evaluations
         """
         self.prediction_fxn = prediction_fxn
-        self.n_feats = n_feats
+        self.n_feats = len(baseline_values)
+        self.baseline_values = baseline_values[None, :]
         self.var_names = var_names
-        self.max_evals = 2*self.n_feats + max_evals
+        if var_names:
+            assert len(var_names) == self.n_feats, "Number of variable names must match number of features"
         
+        # Baseline model prediction
+        self.yh_baseline = self.prediction_fxn(self.baseline_values).item()
+
+        # Model evaluation combinations
+        self.max_evals = 2*self.n_feats + max_evals
         self.all_evals, self.feat_marginal_evals = self._enumerate_model_evaluations()
 
+        # On/Off feature toggle
         self.feat_toggle = np.zeros((len(self.all_evals), self.n_feats))
         for i, toggle in enumerate(self.all_evals):
             self.feat_toggle[i, toggle] = 1
@@ -99,11 +108,11 @@ class SHAPExplainer():
 
         return all_evals, feat_marginal_evals
     
-    def _evaluate_model(self, obs_values, reference_values):
+    def _evaluate_model(self, obs_values):
         # Feature combo matrix
         combos = (
             self.feat_toggle*(np.array(obs_values)[None, :]) + 
-            (1 - self.feat_toggle)*(np.array(reference_values)[None, :])
+            (1 - self.feat_toggle)*(self.baseline_values)
         )
         
         # Model's prediction for each sample
@@ -130,12 +139,12 @@ class SHAPExplainer():
             
         return feature_impacts
     
-    def shap_values(self, x, reference_values):
-        """Compute SHAP values for each observation (row) in input matrix x
+    def shap_values(self, x):
+        """Compute SHAP values for each observation (row) in input matrix x relative
+        to baseline value for each feature.
 
         Args:
             x (ndarray): Matrix of input feature observations (n_obs, n_feats)
-            reference_values (ndarray): Reference or baseline value to compare each feature against (n_feats,)
 
         Returns:
             output (dict):
@@ -146,7 +155,7 @@ class SHAPExplainer():
         # Compute SHAP values for each row
         values = []
         for row in x:
-            model_evals = self._evaluate_model(row, reference_values)
+            model_evals = self._evaluate_model(row)
             values.append(self._est_feature_impacts(model_evals))
 
         # Result DataFrames
@@ -165,4 +174,121 @@ class SHAPExplainer():
             'features': inputs,
             'shap_values': values,
         }
+
+    def plot_global_impact(self, shap_values, relative=True, target_name=None):
+        values = shap_values.loc[:, self.var_names].values
+        labels = np.array(self.var_names)
+
+        if relative:
+            row_sums = np.sum(np.abs(values), axis=1) + 1e-6
+            values = values/row_sums[:, None]
+
+        # Avg impact of each feature based on absolute SHAP values
+        feature_impact = np.mean(np.abs(values), axis=0)
+
+        # Sort features largest ABS impact to smallest
+        sort_idxs = np.argsort(feature_impact)
+        values = np.abs(values[:, sort_idxs])
+        labels = labels[sort_idxs]
+
+        # Plot
+        fig, ax = plt.subplots(figsize=(15,10))
+
+        boxplot = ax.boxplot(
+            values,
+            labels=labels,
+            sym='',                                 # No fliers
+            whis=(5, 95),                           # 5% and 95% whiskers
+            widths=0.8,
+            vert=False,                             # Horizontal plot
+            patch_artist=True,                      # Need this flag to color boxes
+            boxprops=dict(facecolor=(0,0,0,0.10)),  # Color faces black with 10% alpha
+        )
+
+        # Color median line
+        plt.setp(boxplot['medians'], color='red')
+
+        # Add mean points
+        ax.plot(
+            feature_impact[sort_idxs],
+            np.arange(len(feature_impact)) + 1, 
+            linewidth=0,
+            marker='D', 
+            markersize=5,
+            markerfacecolor='k',
+            markeredgecolor='k'
+        )
+
+        if relative:
+            ax.set_xticklabels([f'{x:.0%}' for x in ax.get_xticks()])
+            ax.set_xlabel('Relative impact (%)')
+        else:
+            ax.set_xlabel(target_name)
+
+        ax.set_yticks(np.arange(len(feature_impact)) + 1)
+        ax.set_ylabel('Feature')
+
+        if target_name is None:
+            target_name = 'Target Variable'
+        ax.set_title(label=f'Global Impact of Features on {target_name}', loc='left', fontdict={'fontsize': 16})
+
+        return plt, ax
+
+    def plot_local_impact(self, obs, ref_obs=None, target_name=None):
+        if ref_obs is not None:
+            values = obs - ref_obs
+            ref_value = ref_obs['yh']
+        else:
+            values = obs
+            ref_value = self.yh_baseline
         
+        values = values[self.var_names].sort_values()
+        
+        labels = [''] + list(values.index)
+        values = [0] + list(values)
+        
+        n = len(values)
+        idx = np.arange(n)
+
+        fig, ax = plt.subplots(figsize=(7,10))
+
+        # Feature impact bars
+        ax.barh(
+            idx,
+            width=values,
+            color=['blue' if x >= 0 else 'red' for x in values],
+            height=1,
+            alpha=0.5
+        )
+
+        # Cumulative impact line
+        ax.plot(
+            np.cumsum(values), 
+            idx,
+            color='black',
+            alpha=0.5,
+            marker='o',
+        )
+
+        # Vertical lines
+        ax.axvline(x=0, color='black', linestyle='--')
+        total_impact = np.sum(values)
+        ax.axvline(
+            x=total_impact, 
+            color='blue' if total_impact >= 0 else 'red', 
+            linestyle='--'
+        )
+
+        # Axis labels
+        ax.set_xticklabels([f'{x:.2f}' for x in ax.get_xticks() + ref_value])
+        ax.set_xlabel(target_name)
+
+        ax.set_yticks(idx)
+        ax.set_yticklabels(labels)
+        ax.set_ylabel('Feature')
+
+        if target_name is None:
+            target_name = 'Target Variable'
+        ax.set_title(label=f'Local Impact of Features on {target_name}', loc='left', fontdict={'fontsize': 16})
+
+        return fig, ax
