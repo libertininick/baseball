@@ -6,7 +6,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.8.0
+#       jupytext_version: 1.9.1
 #   kernelspec:
 #     display_name: baseball_env
 #     language: python
@@ -53,7 +53,7 @@ DATA_PATH = '../data'
 MODEL_PATH = '../models'
 
 from retrosheet_tools import get_gamelogs
-from shap_explainer import SHAPExplainer
+from shap_explainer import InputLevels, SHAPExplainer
 # -
 
 # # Load data
@@ -95,7 +95,10 @@ def bucket_attendence(group):
     bucket = (prec_capacity//(1/3))
     return bucket
 
+capacity_map = {0: 'low', 1: 'med', 2: 'high'}
 df_subset['Attendance'] = df_subset.groupby(['ParkID']).apply(bucket_attendence).values
+df_subset['Attendance'] = np.vectorize(capacity_map.get)(df_subset['Attendance'])
+
 
 # Add win targets
 target_suffixes += ['Win']
@@ -108,29 +111,72 @@ df_subset = df_subset.dropna(how='any', axis='rows')
 
 print(f'''Vis Win {np.mean(df_subset['VisWin']):.2%}''')
 print(f'''Hm  Win {np.mean(df_subset['HmWin']):.2%}''')
-
-# +
-input_maps = dict()
-
-input_maps['years'] = {x: i + 1 for i, x in enumerate(np.unique(df_subset['Year'].values))}
-input_maps['months'] = {x: i + 1 for i, x in enumerate(np.unique(df_subset['Month'].values))}
-input_maps['dow'] = {x: i + 1 for i, x in enumerate(np.unique(df_subset['Day'].values))}
-input_maps['time_of_day'] = {x: i + 1 for i, x in enumerate(np.unique(df_subset['DayNight'].values))}
-input_maps['parks'] = {x: i + 1 for i, x in enumerate(np.unique(df_subset['ParkID'].values))}
-input_maps['leagues'] = {x: i + 1 for i, x in enumerate(np.unique(df_subset['HmTmLg'].values))}
-input_maps['umps'] = {x: i + 1 for i, x in enumerate(np.unique(df_subset['UmpHID'].values))}
-input_maps['teams'] = {x: i + 1 for i, x in enumerate(np.unique(np.concatenate((df_subset['VisTmYr'].values, 
-                                                                            df_subset['HmTmYr'].values))))}
-input_maps['pitchers'] = {x: i + 1 for i, x in enumerate(np.unique(np.concatenate((df_subset['VisStPchID'].values, 
-                                                                               df_subset['HmStPchID'].values))))}
-input_maps['managers'] = {x: i + 1 for i, x in enumerate(np.unique(np.concatenate((df_subset['VisMgrID'].values, 
-                                                                               df_subset['HmMgrID'].values))))}
-input_maps['home_away'] = {'away_low': 1, 'away_med': 2, 'away_high': 3,
-                           'home_low': 4, 'home_med': 5, 'home_high': 6,
-                          }
-
-
 # -
+
+# ## Create InputLevels
+
+min_obs = 30
+input_levels = {
+    'years': InputLevels(df_subset['Year'].values, min_obs),
+    'months': InputLevels(df_subset['Month'].values, min_obs),
+    'dow': InputLevels(df_subset['Day'].values, min_obs),
+    'time_of_day': InputLevels(df_subset['DayNight'].values, min_obs),
+    'parks': InputLevels(df_subset['ParkID'].values, min_obs),
+    'leagues': InputLevels(df_subset['HmTmLg'].values, min_obs),
+    'umps': InputLevels(df_subset['UmpHID'].values, min_obs),
+    'teams': InputLevels(np.concatenate((df_subset['VisTmYr'].values, df_subset['HmTmYr'].values)), min_obs),
+    'pitchers': InputLevels(np.concatenate((df_subset['VisStPchID'].values, df_subset['HmStPchID'].values)), min_obs),
+    'managers': InputLevels(np.concatenate((df_subset['VisMgrID'].values, df_subset['HmMgrID'].values)), min_obs),
+    'home_away': InputLevels([
+        'away_low',
+        'away_med',
+        'away_high',
+        'home_low',
+        'home_med',
+        'home_high',
+    ]),
+}
+
+
+def get_inputs(row, home_tm_last=True):
+    
+    inputs = [
+        input_levels['years'].get_indexes(row['Year']),
+        input_levels['months'].get_indexes(row['Month']),
+        input_levels['dow'].get_indexes(row['Day']),
+        input_levels['time_of_day'].get_indexes(row['DayNight']),
+        input_levels['parks'].get_indexes(row['ParkID']),
+        input_levels['leagues'].get_indexes(row['HmTmLg']),
+        input_levels['umps'].get_indexes(row['UmpHID']),
+    ]
+    
+    if home_tm_last:
+        inputs.extend([
+            input_levels['teams'].get_indexes(row['VisTmYr']),
+            input_levels['pitchers'].get_indexes(row['VisStPchID']),
+            input_levels['managers'].get_indexes(row['VisMgrID']),
+            input_levels['teams'].get_indexes(row['HmTmYr']),
+            input_levels['pitchers'].get_indexes(row['HmStPchID']),
+            input_levels['managers'].get_indexes(row['HmMgrID']),
+            input_levels['home_away'].get_indexes('home_' + row['Attendance']),
+        ])
+
+    else:
+        inputs.extend([
+            input_levels['teams'].get_indexes(row['HmTmYr']),
+            input_levels['pitchers'].get_indexes(row['HmStPchID']),
+            input_levels['managers'].get_indexes(row['HmMgrID']),
+            input_levels['teams'].get_indexes(row['VisTmYr']),
+            input_levels['pitchers'].get_indexes(row['VisStPchID']),
+            input_levels['managers'].get_indexes(row['VisMgrID']),
+            input_levels['home_away'].get_indexes('away_' + row['Attendance']),
+        ])
+
+    return np.array(inputs)
+
+
+
+# ## Binary targets
 
 def get_binary_targets(df, var_suffix, n_q=10):
     n = len(df)
@@ -166,53 +212,24 @@ for suffix in target_suffixes:
         target_dfs[suffix] = {'Vis': vis_targets, 'Hm': hm_targets}
 
 
-# +
-def get_inputs(row, home_tm_last=True):
+# ## Get sample
+
+def get_sample(df, target_dfs, n=None, idxs=None, mask_p=0.15, rnd=None):
+    if rnd is None:
+        rnd = np.random.RandomState()
     
-    inputs = [
-        input_maps['years'].get(row['Year']),
-        input_maps['months'].get(row['Month']),
-        input_maps['dow'].get(row['Day']),
-        input_maps['time_of_day'].get(row['DayNight']),
-        input_maps['parks'].get(row['ParkID']),
-        input_maps['leagues'].get(row['HmTmLg']),
-        input_maps['umps'].get(row['UmpHID']),
-    ]
-    
-    if home_tm_last:
-        inputs.extend([
-            input_maps['teams'].get(row['VisTmYr']),
-            input_maps['pitchers'].get(row['VisStPchID']),
-            input_maps['managers'].get(row['VisMgrID']),
-            input_maps['teams'].get(row['HmTmYr']),
-            input_maps['pitchers'].get(row['HmStPchID']),
-            input_maps['managers'].get(row['HmMgrID']),
-            (row['Attendance'] + 1) + 3,
-        ])
-
-    else:
-        inputs.extend([
-            input_maps['teams'].get(row['HmTmYr']),
-            input_maps['pitchers'].get(row['HmStPchID']),
-            input_maps['managers'].get(row['HmMgrID']),
-            input_maps['teams'].get(row['VisTmYr']),
-            input_maps['pitchers'].get(row['VisStPchID']),
-            input_maps['managers'].get(row['VisMgrID']),
-            row['Attendance'] + 1,
-        ])
-
-    return np.array(inputs)
-
-
-def get_sample(df, target_dfs, n=None, idxs=None, mask_p=0.15):
     if idxs is not None:
         s = df.iloc[idxs]
     else:
         s = df.sample(n=n)
         
     # Inputs
-    x = np.stack(s.apply(lambda r: get_inputs(r, np.random.rand() < 0.5), axis=1).tolist())
-    vis_hm_idx = (x[:,-1] <= 3).astype(int)
+    x = np.stack(s.apply(lambda r: get_inputs(r, rnd.rand() <= 0.5), axis=1).tolist())
+    vis_hm_idx = np.array([
+        ('home' in x) if x is not None else False
+        for x 
+        in input_levels['home_away'].get_levels(x[:,-1])
+    ]).astype(int)
     
     if mask_p > 0:
         mask = np.random.rand(*x.shape) <= mask_p
@@ -236,9 +253,12 @@ def get_sample(df, target_dfs, n=None, idxs=None, mask_p=0.15):
     return x, targets
 
 
-# -
-
-x, y = get_sample(df_subset, target_dfs, idxs=range(10))
+x, y = get_sample(
+    df_subset, 
+    target_dfs,
+#     n=5000,
+    idxs=range(10),
+)
 print('X')
 print(x.astype(int))
 print()
@@ -249,34 +269,28 @@ print(y)
 # # Model
 
 class MLBExplainer(nn.Module):
-    def __init__(self, input_maps, target_sizes, feat_size=64):
+    def __init__(self, input_levels, target_sizes, feat_size=64):
         super().__init__()
-        
-        emb_dims = {
-            k: (len(v) + 1, int(len(v)**0.5/2 + 1)*2)
-            for k, v
-            in input_maps.items()
-        }
-        
+
         self.embedders = nn.ModuleDict({
-            k: nn.Embedding(num_emb, emb_dim)
-            for k, (num_emb, emb_dim)
-            in emb_dims.items()
+            k: nn.Embedding(v.n_levels, v.emb_dim)
+            for k, v
+            in input_levels.items()
         })
         for layer in self.embedders.values():
             layer.weight.data = nn.init.normal_(layer.weight.data, mean=0, std=0.01)
         
         env_in_features = sum([
-            emb_dim
-            for k, (_, emb_dim) 
-            in emb_dims.items()
+            v.emb_dim
+            for k, v
+            in input_levels.items()
             if k not in {'teams', 'pitchers', 'managers'}
             
         ])
         team_in_features = sum([
-            emb_dim
-            for k, (_, emb_dim) 
-            in emb_dims.items()
+            v.emb_dim
+            for k, v
+            in input_levels.items()
             if k in {'teams', 'pitchers', 'managers'}
         ])
         
@@ -359,18 +373,17 @@ class MLBExplainer(nn.Module):
         yh = dict()
         for k, classifier in self.target_classifiers.items():
             if k != 'Win':
-                yh[k] = torch.cumsum(classifier(features), dim=-1)  # Use cumsum to enforce monotonic increase in prob
+                # Use cumsum to enforce monotonic increase in prob
+                yh[k] = torch.sigmoid(torch.cumsum(classifier(features), dim=-1))  
             else:
-                yh[k] = classifier(features).squeeze(-1)
+                yh[k] = torch.sigmoid(classifier(features).squeeze(-1))
 
         return yh
 
 
-# + [markdown] heading_collapsed=true
 # # Loss function
 
-# + hidden=true
-bce = nn.BCEWithLogitsLoss()
+bce = nn.BCELoss()
 def loss_fxn(yh, y, device=None):
     losses = []
     for k, targets in y.items():
@@ -384,76 +397,108 @@ def loss_fxn(yh, y, device=None):
     return sum(losses)/(len(losses) + 9)
 
 
-# + [markdown] heading_collapsed=true
+def loss_fxn(yh, y, device=None):
+    return bce(yh['Win'], torch.tensor(y['Win'], device=device))
+
+
+# # Penalty function
+
+def baseline_pentalty(yh_baseline, y, device=None):
+    pentalties = []
+    for k, targets in y.items():
+        mean_probas = torch.tensor(np.mean(targets, axis=0), device = device)
+        pentalty = torch.mean(torch.abs(torch.log((yh_baseline[k]+1e-6)/(mean_probas+1e-6))))
+        
+        if k == 'Win':
+            pentalty = pentalty*10
+            
+        pentalties.append(pentalty)
+        
+    return sum(pentalties)/(len(pentalties) + 9)
+
+
+def baseline_pentalty(yh_baseline, y, device=None):
+    mean_win_proba = np.mean(y['Win'])
+    return torch.abs(torch.log(yh_baseline['Win']/mean_win_proba))
+
+
 # # Training
 
-# + hidden=true
 model = MLBExplainer(
-    input_maps=input_maps,
+    input_levels=input_levels,
     target_sizes={k: v['Vis'].shape[1] for k, v in target_dfs.items()}
 )
 optimizer = torch.optim.Adam(params=model.parameters(), lr=0.0005)
 model
 
-# + hidden=true
+# +
 x, y = get_sample(df_subset, target_dfs, n=128)
-yh = model(x)
-loss_fxn(yh, y)
 
-# + hidden=true
+model.train()
+yh = model(x)
+
+model.eval()
+yh_baseline = model(np.zeros((1,14)))
+
+loss = loss_fxn(yh, y)
+pentalty = baseline_pentalty(yh_baseline, y)
+print(loss, pentalty)
+
+# +
 model.train()
 
 batch_size = 128
 losses = []
-for i in range(1, 100000):
+for i in range(1, 20000):
     # Generate sample
     x, y = get_sample(df_subset, target_dfs, n=batch_size)
     
     # Forward
+    model.train()
     yh = model(x)
     
     # Loss
     loss = loss_fxn(yh, y)
     losses.append(loss.item())
     
-     # Backward
+    # Baseline penality
+    # Keeps baseline prediction inline with average statistics of data
+    x_baseline = np.zeros((1, x.shape[-1]))  # Single observation with all features set to baseline
+    model.eval()                             # Turn off batchnorm for a single observation
+    yh_baseline = model(x_baseline)
+    pentalty = baseline_pentalty(yh_baseline, y)
+    loss = loss + 5*pentalty
+    
+    # Backward
     loss.backward()
     optimizer.step()
             
     # Clean up
     optimizer.zero_grad()
     
-    if i%1000 == 0:
+    if i%500 == 0:
         print(f'{i:>6,}: {np.mean(losses[-100:]):>8.4f}')
 
 fig, ax = plt.subplots(figsize=(10,5))
 _ = ax.plot(pd.Series(losses).rolling(window=100).mean())
 
 torch.save(model.state_dict(), '../models/mlb_explainer.pth')
-
-
 # -
 
 # # Eval
 
-# + [markdown] heading_collapsed=true
 # ## Load trained model
 
-# + hidden=true
-def sigmoid(x):
-    return 1/(1 + np.exp(-x))
-
 model = MLBExplainer(
-    input_maps=input_maps,
+    input_levels=input_levels,
     target_sizes={k: v['Vis'].shape[1] for k, v in target_dfs.items()}
 )
 model.load_state_dict( torch.load('../models/mlb_explainer.pth'))
 model.eval()
 
-# + [markdown] heading_collapsed=true
 # ## Eval model on all data
 
-# + hidden=true
+# +
 y, yh = defaultdict(list), defaultdict(list)
 
 for i in range(0, len(df_subset)//1000 + 1):
@@ -463,7 +508,7 @@ for i in range(0, len(df_subset)//1000 + 1):
 
     with torch.no_grad():
         yh_i = model(x_i)
-        yh_i = {k: sigmoid(v.numpy()) for k, v in yh_i.items()}
+        yh_i = {k: v.numpy() for k, v in yh_i.items()}
         
     for k in y_i.keys():
         y[k].append(y_i[k])
@@ -474,16 +519,15 @@ for i in range(0, len(df_subset)//1000 + 1):
 
 y = {k: np.concatenate(v, axis=0) for k, v in y.items()}
 yh = {k: np.concatenate(v, axis=0) for k, v in yh.items()}
+# -
 
-# + [markdown] heading_collapsed=true
 # ## Win Probability
 
-# + hidden=true
 # Win probability
 fig, ax = plt.subplots(figsize=(10,5))
 _ = ax.hist(yh['Win'])
 
-# + hidden=true
+# +
 outcome = y['Win']
 yh_proba = yh['Win']
 
@@ -496,7 +540,7 @@ print(f'''Model's predicted proba    : {proba_avg:.2%}''')
 print(f'''Model's predicted win proba: {pred_avg:.2%}''')
 print(f'''Model's prediction accuracy: {accuracy:.2%}''')
 
-# + hidden=true
+# +
 from sklearn.metrics import precision_recall_fscore_support
 
 p,r,f = [], [], []
@@ -522,7 +566,7 @@ axs[1].set_title(label='F-score Curve', loc='left', fontdict={'fontsize': 16})
 axs[1].set_xlabel('Prediction Threshold', fontsize=16)
 axs[1].set_ylabel('F-Score', fontsize=16)
 
-# + hidden=true
+# +
 from sklearn.calibration import calibration_curve
 
 fig, ax = plt.subplots(figsize=(8, 8))
@@ -564,9 +608,7 @@ input_features = [
 def predict_win_prob(x):
     model.eval()
     yhs = model(x)
-    yh = yhs['Win'].numpy()
-    p = sigmoid(yh)
-    return p
+    return yhs['Win'].numpy()
 
 
 # ## Explainers
@@ -577,12 +619,12 @@ win_prob_explainer = SHAPExplainer(
     var_names=input_features
 )
 
-win_prob_explainer.yh_baseline.item()
+win_prob_explainer.yh_baseline
 
 # ## Explain a sample of games
 
 # +
-x, targets = get_sample(df_subset, target_dfs, n=50, mask_p=0)
+x, targets = get_sample(df_subset, target_dfs, n=5000, mask_p=0)
 
 x.shape
 # -
@@ -610,6 +652,8 @@ fig, ax = win_prob_explainer.plot_local_impact(
     
 )
 # -
+
+
 
 
 
