@@ -7,6 +7,86 @@ import numpy as np
 import pandas as pd
 
 
+class InputLevels():
+    """Class for transforming the values of a single input feature into levels for embedding.
+    """
+    def __init__(self, values, min_obs=1, nq=None):
+        """
+        Args:
+            values (ndarray): Input values
+            min_obs (int, optional): Minimum number of observations to keep level
+            nq (int, optional): Number of quantiles to buck a numerical feature into
+        """
+        if nq:
+            self.quantized = True
+            
+            # Coerce to float
+            values = values.astype(np.float)
+            
+            # Keep only finite values
+            values = values[np.isfinite(values)]
+            
+            # Use quantiles as levels
+            quantiles = np.linspace(0, 1, nq + 1)
+            levels = np.quantile(values, quantiles)
+            levels[0], levels[-1] = -np.inf, np.inf  # set +/-Inf as bounds
+            self.levels = np.unique(levels)          # remove duplicate levels
+            
+            # Number of levels (bins)
+            # np.digitize(right=False): bins[i-1] <= x < bins[i]; n_levels = n_bins - 1
+            # +1 for NaN level
+            # +1 for baseline
+            self.n_levels = (len(self.levels) - 1) + 1 + 1
+            
+        else:
+            self.quantized = False
+            
+            # Unique levels and counts
+            levels, counts = np.unique(
+                [x for x in values if x], # Remove Nones
+                return_counts=True
+            )
+            
+            # Remove levels with too few observations
+            self.levels = levels[counts >= min_obs]
+            
+            # Number of levels
+            # +1 for unknown/too few
+            # +1 for baseline
+            self.n_levels = len(self.levels) + 1 + 1
+            
+        # Embedding dim
+        self.emb_dim = max(2, int((self.n_levels - 2)**0.5)//2*2)
+
+        # Map levels to indexes starting a 2
+        # Idx 0 reserved for baseline
+        # Idx 1 resevered for unknown/too few/NaN
+        self.levels_to_idxs = {
+            lvl: i
+            for i, lvl
+            in enumerate(self.levels, 2)
+        }
+
+        # Map indexes back to levels
+        self.idxs_to_levels = {v: k for k, v in self.levels_to_idxs.items()} 
+        
+    def get_indexes(self, x):
+        """Map inputs to indexes to be consumed by an embedding layer
+        """           
+        if self.quantized:
+            x = np.array(x, dtype=np.float)
+            binned_data = np.digitize(x, self.levels) + 1
+            binned_data[~np.isfinite(x)] = 1
+            return binned_data
+        else:
+            return np.vectorize(lambda x_i: self.levels_to_idxs.get(x_i, 1))(x)
+
+    def get_levels(self, x):
+        """Map from embedding indexes back to input values
+        """
+        return np.vectorize(lambda x_i: self.idxs_to_levels.get(x_i, None))(x)
+
+
 class SHAPExplainer():
     """Tools for estimating the contribution of each input feature to a 
     statistical model's predictions.
