@@ -126,8 +126,10 @@ class SHAPExplainer():
 
         # On/Off feature toggle
         self.feat_toggle = np.zeros((len(self.all_evals), self.n_feats))
-        for i, toggle in enumerate(self.all_evals):
-            self.feat_toggle[i, toggle] = 1
+        for i, feats in enumerate(self.all_evals):
+            # Toggle ON the features in this specific model evaluation
+            # Those features not in this eval will be set to their baseline value
+            self.feat_toggle[i, feats] = 1
         
     def _enumerate_model_evaluations(self):
         """Enumerate a set of feature combinations from toggeling each input 
@@ -213,7 +215,9 @@ class SHAPExplainer():
         for f, f_evals in self.feat_marginal_evals.items():
             impact, total_wt = 0, 0
             for lhs, rhs, wt in f_evals:
-                impact += (model_evals.get(rhs) - model_evals.get(lhs))*wt
+                pred_before = model_evals.get(lhs)       # Model's prediction before adding feature_i
+                pred_after = model_evals.get(rhs)        # Model's prediction after adding feature_i
+                impact += (pred_after - pred_before)*wt  # Marginal impact of adding feature_i
                 total_wt += wt
             feature_impacts[f] = impact/total_wt
             
