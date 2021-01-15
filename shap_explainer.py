@@ -318,6 +318,151 @@ class SHAPExplainer():
 
         return plt, ax
 
+    def plot_feature_levels_marginal_impact(self, shap_values, feat_values, feat_name, reverse_colors=False):
+
+        feature_sv = pd.DataFrame({
+            'level': feat_values,
+            'marginal_impact': shap_values[feat_name],
+            'model_prediction': shap_values['yh'],
+        }).fillna('None')
+
+        # Summarize each level in feature
+        levels_summary = feature_sv.groupby('level').agg('median').reset_index()
+
+        # Enumerate perfect correlation ordering of model prediction and marginal impacts
+        perfect_cor = pd.DataFrame({
+            'model_prediction': np.sort(levels_summary['model_prediction']), 
+            'marginal_impact_pc': np.sort(levels_summary['marginal_impact']),
+        })
+        levels_summary = pd.merge(levels_summary, perfect_cor, on='model_prediction')
+
+        # Find difference between each level's median marginal impact and the perfect correlation est of its marginal impact
+        levels_summary['marginal_impact_diff'] = levels_summary['marginal_impact'] - levels_summary['marginal_impact_pc']
+
+        # Plot
+        fig, ax = plt.subplots(figsize=(15,15))
+
+        y_min, y_max = min(levels_summary['marginal_impact']), max(levels_summary['marginal_impact'])
+        x_min, x_max = min(levels_summary['model_prediction']), max(levels_summary['model_prediction'])
+
+        if reverse_colors:
+            shade_color_a = 'blue'
+            shade_color_b = 'red'
+            text_color_a = 'darkblue'
+            text_color_b = 'red'
+        else:
+            shade_color_a = 'red'
+            shade_color_b = 'blue'
+            text_color_a = 'red' 
+            text_color_b = 'darkblue'
+
+        # Marginal impact vs. average model prediction scatter
+        ax.errorbar(
+            levels_summary['model_prediction'], 
+            levels_summary['marginal_impact'], 
+            yerr=[
+                np.where(levels_summary['marginal_impact_diff'] > 0, levels_summary['marginal_impact_diff'], 0),
+                np.where(levels_summary['marginal_impact_diff'] < 0, -levels_summary['marginal_impact_diff'], 0)
+            ],
+            color='black',
+            alpha=0.5,
+            fmt='.',
+            ecolor='gray',
+            elinewidth=1,
+        )
+        ax.set_xlabel('Model Prediction')
+        ax.set_ylabel('Marginal Impact')
+
+        # Plot line of hypothetical perfect correlation between model's prediction and marginal impact
+        ax.plot(
+            np.sort(levels_summary['model_prediction']), 
+            np.sort(levels_summary['marginal_impact']),
+            "k:",
+            label='Perfect Correlation'
+        )
+        ax.legend(loc='upper left')
+
+        # Baseline prediction vline
+        ax.axvline(x=self.yh_baseline, color='black', alpha=0.5)
+
+        # 0 Marginal impact hline
+        ax.axhline(y=0, color='black', alpha=0.5)
+
+        # Label "worst"/"best" levels
+        for i, (_, row) in enumerate(
+            levels_summary
+            .query('marginal_impact < 0')
+            .query('marginal_impact_diff < 0')
+            .sort_values(by=['marginal_impact_diff', 'marginal_impact'])
+            .head(5)
+            .loc[:, ['level', 'model_prediction', 'marginal_impact']]
+            .sort_values(by='model_prediction')
+            .iterrows()
+        ):
+            label, _x, _y = row.values
+            ax.annotate(
+                text=label, 
+                xy=(_x, _y),
+                xytext=(_x + x_max*0.05, _y - y_max*0.15/(i+1)),
+                fontsize=12,
+                color=text_color_a,
+                arrowprops=dict(arrowstyle='->')
+            )
+
+        for i, (_, row) in enumerate(
+            levels_summary
+            .query('marginal_impact > 0')
+            .query('marginal_impact_diff > 0')
+            .sort_values(by=['marginal_impact_diff', 'marginal_impact'])
+            .tail(5)
+            .loc[:, ['level', 'model_prediction', 'marginal_impact']]
+            .sort_values(by='model_prediction')
+            .iterrows()
+        ):
+            label, _x, _y = row.values
+            ax.annotate(
+                text=label, 
+                xy=(_x, _y),
+                xytext=(_x + x_max*0.05, _y + y_max*0.15/(i+1)),
+                fontsize=12,
+                color=text_color_b,
+                arrowprops=dict(arrowstyle='->')
+            )
+    
+        # Shade regions
+        ax.fill_between( 
+            np.sort(levels_summary['model_prediction']), 
+            np.full_like(levels_summary['marginal_impact'], fill_value=y_min), 
+            np.sort(levels_summary['marginal_impact']), 
+            color=shade_color_a,  
+            alpha=0.15 
+        )
+
+        ax.fill_between(
+            np.sort(levels_summary['model_prediction']), 
+            np.sort(levels_summary['marginal_impact']), 
+            np.full_like(levels_summary['marginal_impact'], fill_value=y_max), 
+            color=shade_color_b, 
+            alpha=0.15
+        )
+        ax.fill_between( 
+            [self.yh_baseline, x_max],  
+            [y_min, y_min],  
+            [0, 0],  
+            color=shade_color_a,  
+            alpha=0.15 
+        )
+
+        ax.fill_between(
+            [x_min, self.yh_baseline], 
+            [0, 0], 
+            [y_max,y_max], 
+            color=shade_color_b, 
+            alpha=0.15
+        )
+
+        return fig, ax
+
     def plot_local_impact(self, obs, ref_obs=None, target_name=None):
         if ref_obs is not None:
             values = obs - ref_obs

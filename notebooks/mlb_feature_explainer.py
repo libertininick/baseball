@@ -176,6 +176,7 @@ def get_inputs(row, home_tm_last=True):
 
 
 
+
 # ## Binary targets
 
 def get_binary_targets(df, var_suffix, n_q=10):
@@ -407,7 +408,7 @@ def baseline_pentalty(yh_baseline, y, device=None):
     pentalties = []
     for k, targets in y.items():
         mean_probas = torch.tensor(np.mean(targets, axis=0), device = device)
-        pentalty = torch.mean(torch.abs(torch.log((yh_baseline[k]+1e-6)/(mean_probas+1e-6))))
+        pentalty = torch.mean(torch.abs(torch.log((yh_baseline[k] + 1e-6)/(mean_probas + 1e-6))))
         
         if k == 'Win':
             pentalty = pentalty*10
@@ -476,7 +477,7 @@ for i in range(1, 20000):
     # Clean up
     optimizer.zero_grad()
     
-    if i%500 == 0:
+    if i%100 == 0:
         print(f'{i:>6,}: {np.mean(losses[-100:]):>8.4f}')
 
 fig, ax = plt.subplots(figsize=(10,5))
@@ -618,24 +619,53 @@ win_prob_explainer = SHAPExplainer(
     baseline_values = np.zeros(len(input_features)),
     var_names=input_features
 )
-
 win_prob_explainer.yh_baseline
 
-# ## Explain a sample of games
+# ## Explain each game
 
 # +
-x, targets = get_sample(df_subset, target_dfs, n=5000, mask_p=0)
+# x, targets = get_sample(df_subset, target_dfs, n=5000, mask_p=0)
+x, y = get_sample(
+    df_subset, 
+    target_dfs,
+    idxs=range(len(df_subset)),
+    mask_p=0,
+)
 
 x.shape
 # -
 
 win_prob_sv = win_prob_explainer.shap_values(x)
-win_prob_sv['shap_values']
 
 # ## Global feature impact
 
 fig, ax = win_prob_explainer.plot_global_impact(win_prob_sv['shap_values'], False, "Win Probability")
 _ = ax.set_xticklabels([f'{x:.0%}' for x in ax.get_xticks()])
+
+# ## Feature levels marginal impact
+
+np.median(win_prob_sv['shap_values']['yh'][feat_values == 'BOS2019'])
+
+feat_name = 'team'
+col_idx, *_ = np.where(np.array(win_prob_explainer.var_names) == feat_name)
+col_idx = col_idx.item()
+feat_values = input_levels['teams'].get_levels(x[:, col_idx])
+
+# +
+fig, ax = win_prob_explainer.plot_feature_levels_marginal_impact(
+    shap_values=win_prob_sv['shap_values'],
+    feat_values=feat_values,
+    feat_name=feat_name
+)
+
+_ = ax.set_title(
+    label='Marginal impact of each team vs. Model prediction for game outcome\nMedian across all HOME games played by team', 
+    loc='left', 
+    fontdict={'fontsize': 16}
+)
+_ = ax.set_xticklabels([f'{x:.0%}' for x in ax.get_xticks()])
+_ = ax.set_yticklabels([f'{x:.0%}' for x in ax.get_yticks()])
+# -
 
 # ## Local feature impact
 
@@ -652,6 +682,7 @@ fig, ax = win_prob_explainer.plot_local_impact(
     
 )
 # -
+
 
 
 
