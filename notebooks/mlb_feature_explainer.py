@@ -175,8 +175,6 @@ def get_inputs(row, home_tm_last=True):
     return np.array(inputs)
 
 
-
-
 # ## Binary targets
 
 def get_binary_targets(df, var_suffix, n_q=10):
@@ -224,8 +222,8 @@ def get_sample(df, target_dfs, n=None, idxs=None, mask_p=0.15, rnd=None):
     else:
         s = df.sample(n=n)
         
-    # Inputs
     x = np.stack(s.apply(lambda r: get_inputs(r, rnd.rand() <= 0.5), axis=1).tolist())
+
     vis_hm_idx = np.array([
         ('home' in x) if x is not None else False
         for x 
@@ -382,8 +380,10 @@ class MLBExplainer(nn.Module):
         return yh
 
 
+# + [markdown] heading_collapsed=true
 # # Loss function
 
+# + hidden=true
 bce = nn.BCELoss()
 def loss_fxn(yh, y, device=None):
     losses = []
@@ -398,12 +398,10 @@ def loss_fxn(yh, y, device=None):
     return sum(losses)/(len(losses) + 9)
 
 
-def loss_fxn(yh, y, device=None):
-    return bce(yh['Win'], torch.tensor(y['Win'], device=device))
-
-
+# + [markdown] heading_collapsed=true
 # # Penalty function
 
+# + hidden=true
 def baseline_pentalty(yh_baseline, y, device=None):
     pentalties = []
     for k, targets in y.items():
@@ -418,13 +416,10 @@ def baseline_pentalty(yh_baseline, y, device=None):
     return sum(pentalties)/(len(pentalties) + 9)
 
 
-def baseline_pentalty(yh_baseline, y, device=None):
-    mean_win_proba = np.mean(y['Win'])
-    return torch.abs(torch.log(yh_baseline['Win']/mean_win_proba))
-
-
+# + [markdown] heading_collapsed=true
 # # Training
 
+# + hidden=true
 model = MLBExplainer(
     input_levels=input_levels,
     target_sizes={k: v['Vis'].shape[1] for k, v in target_dfs.items()}
@@ -432,7 +427,7 @@ model = MLBExplainer(
 optimizer = torch.optim.Adam(params=model.parameters(), lr=0.0005)
 model
 
-# +
+# + hidden=true
 x, y = get_sample(df_subset, target_dfs, n=128)
 
 model.train()
@@ -445,7 +440,7 @@ loss = loss_fxn(yh, y)
 pentalty = baseline_pentalty(yh_baseline, y)
 print(loss, pentalty)
 
-# +
+# + hidden=true
 model.train()
 
 batch_size = 128
@@ -632,30 +627,38 @@ x, y = get_sample(
     mask_p=0,
 )
 
+yh = predict_win_prob(x)
+
 x.shape
 # -
 
-win_prob_sv = win_prob_explainer.shap_values(x)
+win_prob_sv = win_prob_explainer.get_shap_values(x)
 
 # ## Global feature impact
 
-fig, ax = win_prob_explainer.plot_global_impact(win_prob_sv['shap_values'], False, "Win Probability")
+fig, ax = win_prob_explainer.plot_global_impact(
+    shap_values=win_prob_sv, 
+    relative=False, 
+    target_name="Win Probability"
+)
 _ = ax.set_xticklabels([f'{x:.0%}' for x in ax.get_xticks()])
 
 # ## Feature levels marginal impact
 
-np.median(win_prob_sv['shap_values']['yh'][feat_values == 'BOS2019'])
-
+# +
 feat_name = 'team'
 col_idx, *_ = np.where(np.array(win_prob_explainer.var_names) == feat_name)
 col_idx = col_idx.item()
 feat_values = input_levels['teams'].get_levels(x[:, col_idx])
 
-# +
+print(f'''Median win probability of 2019 Red Sox: {np.median(yh[feat_values == 'BOS2019']):.2%}''')
+
 fig, ax = win_prob_explainer.plot_feature_levels_marginal_impact(
-    shap_values=win_prob_sv['shap_values'],
     feat_values=feat_values,
-    feat_name=feat_name
+    feat_shap_values=win_prob_sv[:, col_idx],
+    model_predictions=predict_win_prob(x),
+    yh_ref=win_prob_explainer.yh_baseline,
+    n_label=5
 )
 
 _ = ax.set_title(
@@ -663,28 +666,53 @@ _ = ax.set_title(
     loc='left', 
     fontdict={'fontsize': 16}
 )
+
 _ = ax.set_xticklabels([f'{x:.0%}' for x in ax.get_xticks()])
 _ = ax.set_yticklabels([f'{x:.0%}' for x in ax.get_yticks()])
+# -
+
+# ## Feature embedding plot
+
+# +
+feat_name = 'home_away'
+col_idx, *_ = np.where(np.array(win_prob_explainer.var_names) == feat_name)
+col_idx = col_idx.item()
+feat_values = input_levels['home_away'].get_levels(x[:, col_idx])
+
+level_embeddings = model.embedders['home_away'].weight.data.numpy()
+
+fig, ax = win_prob_explainer.plot_feature_level_embeddings(
+    level_embeddings=level_embeddings,
+    emb_idx_level_mapper=input_levels['home_away'].get_levels,
+    feat_values=feat_values,
+    feat_shap_values=win_prob_sv[:, col_idx],
+    n_label=5,
+)
+
+# +
+feat_name = 'pitcher'
+col_idx, *_ = np.where(np.array(win_prob_explainer.var_names) == feat_name)
+col_idx = col_idx.item()
+feat_values = input_levels['pitchers'].get_levels(x[:, col_idx])
+
+level_embeddings = model.embedders['pitchers'].weight.data.numpy()
+
+fig, ax = win_prob_explainer.plot_feature_level_embeddings(
+    level_embeddings=level_embeddings,
+    emb_idx_level_mapper=input_levels['pitchers'].get_levels,
+    feat_values=feat_values,
+    feat_shap_values=win_prob_sv[:, col_idx],
+    n_label=5,
+)
 # -
 
 # ## Local feature impact
 
 fig, ax = win_prob_explainer.plot_local_impact(
-    obs=win_prob_sv['shap_values'].iloc[5],
+    obs_shap_values=win_prob_sv[-1],
+    yh_ref=win_prob_explainer.yh_baseline,
     target_name="Win Probability"
 )
-
-# +
-fig, ax = win_prob_explainer.plot_local_impact(
-    obs=win_prob_sv['shap_values'].iloc[5],
-    ref_obs=win_prob_sv['shap_values'].iloc[3],
-    target_name="Win Probability",
-    
-)
-# -
-
-
-
 
 
 
