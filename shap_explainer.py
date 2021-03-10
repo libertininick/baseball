@@ -409,10 +409,15 @@ class SHAPExplainer():
         )
 
         # Enumerate perfect correlation ordering of model prediction and marginal impacts
-        perfect_cor = pd.DataFrame({
-            'model_prediction': np.sort(levels_summary['model_prediction']), 
-            'marginal_impact_pc': np.sort(levels_summary['marginal_impact']),
-        })
+        perfect_cor = (
+            pd.DataFrame({
+                'model_prediction': np.sort(levels_summary['model_prediction']), 
+                'marginal_impact_pc': np.sort(levels_summary['marginal_impact']),
+            })
+            .groupby('model_prediction')
+            .mean()
+            .reset_index()
+        )
         levels_summary = pd.merge(levels_summary, perfect_cor, on='model_prediction')
 
         # Find difference between each level's median marginal impact and the perfect correlation est of its marginal impact
