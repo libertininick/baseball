@@ -54,6 +54,8 @@ MODEL_PATH = '../models'
 
 from retrosheet_tools import get_gamelogs
 from shap_explainer import InputLevels, SHAPExplainer
+from modules import MLBExplainerModel
+from training_utils import lr_schedule, set_lr, loss_fxn, baseline_penalty
 # -
 
 # # Load data
@@ -252,200 +254,27 @@ def get_sample(df, target_dfs, n=None, idxs=None, mask_p=0.15, rnd=None):
     return x, targets
 
 
-x, y = get_sample(
-    df_subset, 
-    target_dfs,
-#     n=5000,
-    idxs=range(10),
-)
-print('X')
-print(x.astype(int))
-print()
-print('y')
-print(y)
+# # Train Model
 
+# +
+batch_size = 128
+n_batches = 2000
+lr_min, lr_max = 0.0001, 0.002
+lr_cycle_len = 50
+lrs = list(lr_schedule(lr_cycle_len, lr_min, lr_max))*(n_batches//lr_cycle_len)
+avg_penalty_scale, baseline_penalty_scale = 1, 5
 
-# # Model
-
-class MLBExplainer(nn.Module):
-    def __init__(self, input_levels, target_sizes, feat_size=64):
-        super().__init__()
-
-        self.embedders = nn.ModuleDict({
-            k: nn.Embedding(v.n_levels, v.emb_dim)
-            for k, v
-            in input_levels.items()
-        })
-        for layer in self.embedders.values():
-            layer.weight.data = nn.init.normal_(layer.weight.data, mean=0, std=0.01)
-        
-        env_in_features = sum([
-            v.emb_dim
-            for k, v
-            in input_levels.items()
-            if k not in {'teams', 'pitchers', 'managers'}
-            
-        ])
-        team_in_features = sum([
-            v.emb_dim
-            for k, v
-            in input_levels.items()
-            if k in {'teams', 'pitchers', 'managers'}
-        ])
-        
-        env_hidden_features = int(env_in_features//2)
-        team_hidden_features = int(team_in_features//2)
-        out_features = feat_size
-        self.env_encoder = nn.Sequential(
-            nn.Dropout(0.1),
-            nn.Linear(env_in_features, env_hidden_features),
-            nn.BatchNorm1d(env_hidden_features),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(env_hidden_features, out_features),
-            nn.BatchNorm1d(out_features),
-            nn.ReLU(),
-        )
-        self.team_encoder = nn.Sequential(
-            nn.Dropout(0.1),
-            nn.Linear(team_in_features, team_hidden_features),
-            nn.BatchNorm1d(team_hidden_features),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(team_hidden_features, out_features),
-            nn.BatchNorm1d(out_features),
-            nn.ReLU(),
-        )
-        
-        in_features = out_features*3  # env output, team, opponent
-        hidden_features = in_features//2
-        self.ffn = nn.Sequential(
-            nn.Dropout(0.1),
-            nn.Linear(in_features, hidden_features),
-            nn.BatchNorm1d(hidden_features),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(hidden_features, feat_size),
-        )
-
-        self.target_classifiers = nn.ModuleDict({
-            f'{k}_{side}': nn.Linear(feat_size, n_targets)
-            for k, n_targets in target_sizes.items()
-            for side in ['team', 'opp']
-        })
-        self.target_classifiers['Win'] = nn.Linear(feat_size, 1)
-        
-    def forward(self, x, device=None):
-        
-        # Encodings
-        environment = torch.cat([
-            self.embedders['years'](torch.tensor(x[:, 0], dtype=torch.long, device=device)),
-            self.embedders['months'](torch.tensor(x[:, 1], dtype=torch.long, device=device)),
-            self.embedders['dow'](torch.tensor(x[:, 2], dtype=torch.long, device=device)),
-            self.embedders['time_of_day'](torch.tensor(x[:, 3], dtype=torch.long, device=device)),
-            self.embedders['parks'](torch.tensor(x[:, 4], dtype=torch.long, device=device)),
-            self.embedders['leagues'](torch.tensor(x[:, 5], dtype=torch.long, device=device)),
-            self.embedders['umps'](torch.tensor(x[:, 6], dtype=torch.long, device=device)),
-            self.embedders['home_away'](torch.tensor(x[:, -1], dtype=torch.long, device=device)),
-        ], dim=1)
-        environment = self.env_encoder(environment)
-        
-        team = torch.cat([
-            self.embedders['teams'](torch.tensor(x[:, 10], dtype=torch.long, device=device)),
-            self.embedders['pitchers'](torch.tensor(x[:, 11], dtype=torch.long, device=device)),
-            self.embedders['managers'](torch.tensor(x[:, 12], dtype=torch.long, device=device)),
-        ], dim=1)
-        team = self.team_encoder(team)
-
-        opponent = torch.cat([
-            self.embedders['teams'](torch.tensor(x[:, 7], dtype=torch.long, device=device)),
-            self.embedders['pitchers'](torch.tensor(x[:, 8], dtype=torch.long, device=device)),
-            self.embedders['managers'](torch.tensor(x[:, 9], dtype=torch.long, device=device)),
-        ], dim=1)
-        opponent = self.team_encoder(opponent)
-        
-        # Feed forward to feature vector
-        features = torch.cat((environment, team, opponent), dim=1)
-        features = self.ffn(features)
-        
-        # Classifiers
-        yh = dict()
-        for k, classifier in self.target_classifiers.items():
-            if k != 'Win':
-                # Use cumsum to enforce monotonic increase in prob
-                yh[k] = torch.sigmoid(torch.cumsum(classifier(features), dim=-1))  
-            else:
-                yh[k] = torch.sigmoid(classifier(features).squeeze(-1))
-
-        return yh
-
-
-# + [markdown] heading_collapsed=true
-# # Loss function
-
-# + hidden=true
-bce = nn.BCELoss()
-def loss_fxn(yh, y, device=None):
-    losses = []
-    for k, targets in y.items():
-        loss = bce(yh[k], torch.tensor(targets, device=device))
-        
-        if k == 'Win':
-            loss = loss*10
-            
-        losses.append(loss)
-
-    return sum(losses)/(len(losses) + 9)
-
-
-# + [markdown] heading_collapsed=true
-# # Penalty function
-
-# + hidden=true
-def baseline_pentalty(yh_baseline, y, device=None):
-    pentalties = []
-    for k, targets in y.items():
-        mean_probas = torch.tensor(np.mean(targets, axis=0), device = device)
-        pentalty = torch.mean(torch.abs(torch.log((yh_baseline[k] + 1e-6)/(mean_probas + 1e-6))))
-        
-        if k == 'Win':
-            pentalty = pentalty*10
-            
-        pentalties.append(pentalty)
-        
-    return sum(pentalties)/(len(pentalties) + 9)
-
-
-# + [markdown] heading_collapsed=true
-# # Training
-
-# + hidden=true
-model = MLBExplainer(
+# Init model and optimizer
+model = MLBExplainerModel(
     input_levels=input_levels,
     target_sizes={k: v['Vis'].shape[1] for k, v in target_dfs.items()}
 )
-optimizer = torch.optim.Adam(params=model.parameters(), lr=0.0005)
-model
+optimizer = torch.optim.Adam(params=model.parameters(), lr=lr_min)
 
-# + hidden=true
-x, y = get_sample(df_subset, target_dfs, n=128)
-
-model.train()
-yh = model(x)
-
-model.eval()
-yh_baseline = model(np.zeros((1,14)))
-
-loss = loss_fxn(yh, y)
-pentalty = baseline_pentalty(yh_baseline, y)
-print(loss, pentalty)
-
-# + hidden=true
-model.train()
-
-batch_size = 128
+# Training loop
 losses = []
-for i in range(1, 20000):
+for i, lr in enumerate(lrs, 1):
+    
     # Generate sample
     x, y = get_sample(df_subset, target_dfs, n=batch_size)
     
@@ -454,7 +283,7 @@ for i in range(1, 20000):
     yh = model(x)
     
     # Loss
-    loss = loss_fxn(yh, y)
+    loss = loss_fxn(yh, y, avg_penalty_scale)
     losses.append(loss.item())
     
     # Baseline penality
@@ -462,11 +291,12 @@ for i in range(1, 20000):
     x_baseline = np.zeros((1, x.shape[-1]))  # Single observation with all features set to baseline
     model.eval()                             # Turn off batchnorm for a single observation
     yh_baseline = model(x_baseline)
-    pentalty = baseline_pentalty(yh_baseline, y)
-    loss = loss + 5*pentalty
+    pentalty = baseline_pentalty(yh_baseline, y, baseline_penalty_scale)
+    loss = loss + pentalty
     
     # Backward
     loss.backward()
+    set_lr(optimizer, lr)
     optimizer.step()
             
     # Clean up
@@ -485,7 +315,7 @@ torch.save(model.state_dict(), '../models/mlb_explainer.pth')
 
 # ## Load trained model
 
-model = MLBExplainer(
+model = MLBExplainerModel(
     input_levels=input_levels,
     target_sizes={k: v['Vis'].shape[1] for k, v in target_dfs.items()}
 )
