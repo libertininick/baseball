@@ -1,6 +1,6 @@
 beautifulsoup4
 matplotlib
-numpy==1.19.3
+numpy
 pandas
 requests
 scipy
